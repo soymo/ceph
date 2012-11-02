@@ -19,7 +19,7 @@
 #include <unistd.h>
 #include <getopt.h>
 
-#include <rbd/librbd.h>
+#include "include/rbd/librbd.h"
 
 static int gotrados = 0;
 
