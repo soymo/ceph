@@ -22,6 +22,8 @@
 #include "include/rbd/librbd.h"
 
 static int gotrados = 0;
+struct radosPool *pool;
+rados_t cluster;
 
 static pthread_mutex_t readdir_lock;
 
@@ -42,8 +44,6 @@ struct rbdOptions {
 	char *pool_name;
 };
 
-rados_t cluster;
-
 struct radosPool {
 	char *pool_name;
 	rados_t	cluster;
@@ -51,130 +51,93 @@ struct radosPool {
 	struct radosStat rados_stat;
 	struct radosPool *next;
 };
-
-struct rbdImage {
-	int rbd_in_use;
-	struct radosPool *pool;
-	char *image_name;
-	rbd_image_t image;
-	struct rbdStat rbd_stat;
-	struct rbdImage *next;
-};
-
-struct rbdFd {
-	int fd;
-	struct rbdImage *rbd;
-};
-
-struct rbdOptions rbdOptions = {"/etc/ceph/ceph.conf", "rbd"};
-
 #define MAX_RADOS_POOLS		32
 struct radosPool radosPools[MAX_RADOS_POOLS];
 
-#define MAX_RBD_IMAGES		128
+struct rbdImage {
+	struct radosPool *pool;
+	char *image_name;
+	struct rbdImage *next;
+};
+struct rbdImage *rbdImages;
 
-struct rbdFd rbdFds[MAX_RBD_IMAGES];
-struct rbdImage rbdImages[MAX_RBD_IMAGES];
+struct rbdOpenImage {
+	struct rbdImage *rbdimage;
+	rbd_image_t image;
+	struct rbdStat rbd_stat;
+};
+#define MAX_RBD_IMAGES		128
+struct rbdOpenImage rbdFds[MAX_RBD_IMAGES];
+
+struct rbdOptions rbdOptions = {"/etc/ceph/ceph.conf", "rbd"};
+
 
 /* prototypes */
 void radosPools_init(void);
-void rbdImages_init(void);
+void get_rbdImages(struct rbdImage **head);
 void simple_err(const char *msg, int err);
 int connect_to_cluster();
 
 int radosPool_start(rados_t cluster, char *pool_name);
 int lookup_radosPool(char *pool_name);
 int allocate_radosPool(rados_t cluster, char *pool_name);
-void radosPool_initImages(struct radosPool *pool);
 
-int lookup_rbdImage(char *image_name);
+int open_rbdImage(const char *image_name);
 int allocate_rbdImage(struct radosPool *pool);
 void deallocate_rbdImage(int imageId);
 
-static int open_volume_dir(const char *volume)
-{
-	int dirfd;
-	dirfd = lookup_rbdImage((char *)volume);
-
-	return dirfd;
-}
-
 static void
-iter_volumes(void *cookie, void (*iter)(void *cookie, char *volume, int dirfd))
+iter_images(void *cookie,
+	    void (*iter)(void *cookie, const char *image, int dirfd))
 {
-	struct rbdImage *rbdList;
+	struct rbdImage *im;
 
 	pthread_mutex_lock(&readdir_lock);
 
-	for (rbdList = &(rbdImages[0]); rbdList != NULL;
-	     rbdList = rbdList->next){
-		if ((rbdList->image_name == NULL) ||
-		    (rbdList->rbd_stat.valid == 0))
-			continue;
-		iter(cookie, rbdList->image_name, -1);
-	}
+	for (im = rbdImages; im != NULL; im = im->next)
+		iter(cookie, im->image_name, -1);
 	pthread_mutex_unlock(&readdir_lock);
 }
 
-static int read_property(int dirfd, char *name, unsigned int *_value)
+static int read_property(int fd, char *name, unsigned int *_value)
 {
-	int errors;
 	unsigned int value;
-	struct rbdImage *rbd;
+	struct rbdOpenImage *rbd;
 
-	errors = 0;
-	rbd = rbdFds[dirfd].rbd;
+	rbd = &rbdFds[fd];
 
-	if (rbd == (struct rbdImage *)NULL) {
-		errors++;
-	}
-	if (!errors) {
-		if (rbd->rbd_in_use == 0) {
-			errors++;
-		}
-	}
-	if (!errors) {
-		if (strncmp(name, "obj_siz", 7) == 0) {
-			value = rbd->rbd_stat.rbd_info.obj_size;
-		} else if (strncmp(name, "num_obj", 7) == 0) {
-			value = rbd->rbd_stat.rbd_info.num_objs;
-		} else {
-			errors++;
-		}
-	}
+	if (rbd->image == NULL)
+		return -1;
 
-	if (!errors) {
-		*_value = value;
-		return 0;
+	if (strncmp(name, "obj_siz", 7) == 0) {
+		value = rbd->rbd_stat.rbd_info.obj_size;
+	} else if (strncmp(name, "num_obj", 7) == 0) {
+		value = rbd->rbd_stat.rbd_info.num_objs;
 	} else {
 		return -1;
 	}
+
+	*_value = value;
+	return 0;
 }
 
-static void count_volumes_cb(void *cookie, char *volume, int dirfd)
+static void count_images_cb(void *cookie, const char *image, int dirfd)
 {
 	(*((unsigned int *)cookie))++;
 }
 
-static int count_volumes(void)
+static int count_images(void)
 {
 	unsigned int count = 0;
 
-	iter_volumes(&count, count_volumes_cb);
+	get_rbdImages(&rbdImages);
+	iter_images(&count, count_images_cb);
 	return count;
 }
 
-struct blockfs_getattr_info {
-	unsigned int part_size;
-	int part_size_mismatches;
-	struct timespec st_atim;
-	struct timespec st_mtim;
-	struct timespec st_ctim;
-};
-
 static int blockfs_getattr(const char *path, struct stat *stbuf)
 {
-	int dirfd;
+	int fd;
 	time_t now;
 	unsigned int num_parts;
 	unsigned int part_size;
@@ -191,7 +154,7 @@ static int blockfs_getattr(const char *path, struct stat *stbuf)
 
 		now = time(NULL);
 		stbuf->st_mode = S_IFDIR + 0755;
-		stbuf->st_nlink = 2+count_volumes();
+		stbuf->st_nlink = 2+count_images();
 		stbuf->st_uid = getuid();
 		stbuf->st_gid = getgid();
 		stbuf->st_size = 1024;
@@ -204,15 +167,15 @@ static int blockfs_getattr(const char *path, struct stat *stbuf)
 		return 0;
 	}
 
-	dirfd = open_volume_dir(path + 1);
-	if (dirfd < 0)
+	fd = open_rbdImage(path + 1);
+	if (fd < 0)
 		return -ENOENT;
 
-	if (read_property(dirfd, "num_objs", &num_parts) < 0) {
+	if (read_property(fd, "num_objs", &num_parts) < 0) {
 		return -EINVAL;
 	}
 
-	if (read_property(dirfd, "obj_size", &part_size) < 0) {
+	if (read_property(fd, "obj_size", &part_size) < 0) {
 		return -EINVAL;
 	}
 
@@ -238,7 +201,7 @@ static int blockfs_truncate(const char *path, off_t length)
 
 static int blockfs_open(const char *path, struct fuse_file_info *fi)
 {
-	int dirfd;
+	int fd;
 	unsigned int num_parts;
 	unsigned int part_size;
 
@@ -248,19 +211,19 @@ static int blockfs_open(const char *path, struct fuse_file_info *fi)
 	if (path[0] == 0)
 		return -ENOENT;
 
-	dirfd = open_volume_dir(path + 1);
-	if (dirfd < 0)
+	fd = open_rbdImage(path + 1);
+	if (fd < 0)
 		return -ENOENT;
 
-	if (read_property(dirfd, "num_objs", &num_parts) < 0) {
+	if (read_property(fd, "num_objs", &num_parts) < 0) {
 		return -EINVAL;
 	}
 
-	if (read_property(dirfd, "obj_size", &part_size) < 0) {
+	if (read_property(fd, "obj_size", &part_size) < 0) {
 		return -EINVAL;
 	}
 
-	fi->fh = dirfd;
+	fi->fh = fd;
 
 	return 0;
 }
@@ -269,12 +232,12 @@ static int blockfs_read(const char *path, char *buf, size_t size,
 			off_t offset, struct fuse_file_info *fi)
 {
 	size_t numread;
-	struct rbdImage *rbd;
+	struct rbdOpenImage *rbd;
 
 	if (!gotrados)
 		return -ENXIO;
 
-	rbd = rbdFds[fi->fh].rbd;
+	rbd = &rbdFds[fi->fh];
 	numread = 0;
 	while (size > 0) {
 		ssize_t ret;
@@ -296,12 +259,12 @@ static int blockfs_write(const char *path, const char *buf, size_t size,
 			 off_t offset, struct fuse_file_info *fi)
 {
 	size_t numwritten;
-	struct rbdImage *rbd;
+	struct rbdOpenImage *rbd;
 
 	if (!gotrados)
 		return -ENXIO;
 
-	rbd = rbdFds[fi->fh].rbd;
+	rbd = &rbdFds[fi->fh];
 	numwritten = 0;
 	while (size > 0) {
 		ssize_t ret;
@@ -319,17 +282,17 @@ static int blockfs_write(const char *path, const char *buf, size_t size,
 	return numwritten;
 }
 
-static void blockfs_statfs_volume_cb(void *num, char *volume, int dirfd)
+static void blockfs_statfs_image_cb(void *num, const char *image, int dirfd)
 {
 	unsigned int num_parts, part_size;
-	int	rbdfd;
+	int	fd;
 
 	((uint64_t *)num)[0]++;
 
-	rbdfd = lookup_rbdImage(volume);
-	if (rbdfd >= 0) {
-		if (read_property(dirfd, "num_objs", &num_parts) >= 0) {
-			if (read_property(dirfd, "obj_size", &part_size) >= 0) {
+	fd = open_rbdImage(image);
+	if (fd >= 0) {
+		if (read_property(fd, "num_objs", &num_parts) >= 0) {
+			if (read_property(fd, "obj_size", &part_size) >= 0) {
 				((uint64_t *)num)[1] += (uint64_t)num_parts * (uint64_t)part_size;
 			}
 		}
@@ -345,7 +308,8 @@ static int blockfs_statfs(const char *path, struct statvfs *buf)
 
 	num[0] = 1;
 	num[1] = 0;
-	iter_volumes(num, blockfs_statfs_volume_cb);
+	get_rbdImages(&rbdImages);
+	iter_images(num, blockfs_statfs_image_cb);
 
 #define	RBDFS_BSIZE	4096
 	buf->f_bsize = RBDFS_BSIZE;
@@ -368,7 +332,7 @@ static int blockfs_fsync(const char *path, int datasync,
 {
 	if (!gotrados)
 		return -ENXIO;
-	rbd_flush(rbdFds[fi->fh].rbd->image);
+	rbd_flush(rbdFds[fi->fh].image);
 	return 0;
 }
 
@@ -377,7 +341,7 @@ struct blockfs_readdir_info {
 	fuse_fill_dir_t filler;
 };
 
-static void blockfs_readdir_cb(void *_info, char *name, int dirfd)
+static void blockfs_readdir_cb(void *_info, const char *name, int dirfd)
 {
 	struct blockfs_readdir_info *info = _info;
 
@@ -397,7 +361,8 @@ static int blockfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
 	filler(buf, ".", NULL, 0);
 	filler(buf, "..", NULL, 0);
-	iter_volumes(&info, blockfs_readdir_cb);
+	get_rbdImages(&rbdImages);
+	iter_images(&info, blockfs_readdir_cb);
 
 	return 0;
 }
@@ -407,7 +372,6 @@ blockfs_init(struct fuse_conn_info *conn)
 {
 	int ret;
 	int poolfd;
-	struct radosPool *rados_pool;
 
 	// init cannot fail, so if we fail here, gotrados remains at 0,
 	// causing other operations to fail immediately with ENXIO
@@ -419,14 +383,40 @@ blockfs_init(struct fuse_conn_info *conn)
 	if (poolfd < 0)
 		exit(91);
 
-	rados_pool = &(radosPools[poolfd]);
-	radosPool_initImages(rados_pool);
+	pool = &(radosPools[poolfd]);
 	conn->want |= FUSE_CAP_BIG_WRITES;
 	gotrados = 1;
 
 	// init's return value shows up in fuse_context.private_data,
 	// also to void (*destroy)(void *); useful?
 	return NULL;
+}
+
+#define DEFAULT_IMAGE_SIZE 	1024ULL * 1024 * 1024
+#define DEFAULT_IMAGE_ORDER 	22
+#define DEFAULT_IMAGE_FEATURES 	1
+
+// return -errno on error.  fi->fh is not set until open time
+
+int
+blockfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
+{
+	int r;
+	uint64_t size = DEFAULT_IMAGE_SIZE;
+	int order = DEFAULT_IMAGE_ORDER;
+	uint64_t features = DEFAULT_IMAGE_FEATURES;
+
+	r = rbd_create2(pool->ioctx, path+1, size, features, &order);
+	fprintf(stderr, "rbd_create %s size 0x%lx returns %d\n",
+ 		path, size, r);
+	return r;
+}
+
+int
+blockfs_utime(const char *path, struct utimbuf *utime)
+{
+	fprintf(stderr, "blockfs_utime(%s): ignoring\n", path);
+	return 0;
 }
 
 static struct fuse_operations blockfs_oper = {
@@ -438,7 +428,9 @@ static struct fuse_operations blockfs_oper = {
 	.statfs		= blockfs_statfs,
 	.fsync		= blockfs_fsync,
 	.readdir	= blockfs_readdir,
-	.init		= blockfs_init
+	.init		= blockfs_init,
+	.create		= blockfs_create,
+	.utime		= blockfs_utime
 };
 
 enum {
@@ -608,73 +600,39 @@ radosPools_init(void)
 }
 
 void
-radosPool_initImages(struct radosPool *pool)
+get_rbdImages(struct rbdImage **head)
 {
-	char *imagenames;
-	char *iname, *p, *fullname;
-	int  name_len, ret;
-	size_t	expected_size;
-	int  rbd_fd;
-	struct rbdImage *rbd_image;
-	struct rbdStat  *sbuf;
+	char *ibuf;
+	size_t ibuf_len;
+	struct rbdImage *im, *next;
+	char *ip;
+	int r;
 
-	expected_size = 0;
-	rbd_list(pool->ioctx, NULL, &expected_size);
-	imagenames = (char *)malloc(expected_size);
-	if (imagenames == (char *) NULL) {
+	if (*head != NULL) {
+		for (im = *head; im != NULL;) {
+			next = im->next;
+			free(im);
+			im = next;
+		}
+		*head = NULL;
+	}
+
+	ibuf_len = 0;
+	rbd_list(pool->ioctx, NULL, &ibuf_len);
+	ibuf = malloc(ibuf_len);
+	r = rbd_list(pool->ioctx, ibuf, &ibuf_len);
+	if (r < 0) {
+		simple_err("rbd_list: error %d\n", r);
 		return;
 	}
-	rbd_list(pool->ioctx, imagenames, &expected_size);
-	p = imagenames;
-	while (p < &(imagenames[expected_size])) {
-		iname = p;
-		if (strlen(iname) == 0)
-			break;
-		rbd_fd = allocate_rbdImage(pool);
-		if (rbd_fd >= 0) {
-			rbd_image = rbdFds[rbd_fd].rbd;
-			name_len = strlen(iname) + 1;
-			fullname = malloc(name_len);
-			snprintf(fullname, name_len, "%s", iname);
-			rbd_image->image_name = fullname;
-			ret = rbd_open(pool->ioctx, rbd_image->image_name,
-				       &(rbd_image->image), NULL);
-			if (ret < 0) {
-				simple_err("radosPool_initImages: "
-					   "error opening image", ret);
-				deallocate_rbdImage(rbd_fd);
-			} else {
-				sbuf = &(rbd_image->rbd_stat);
-				rbd_stat(rbd_image->image, &(sbuf->rbd_info),
-					 sizeof(rbd_image_info_t));
-				sbuf->valid = 1;
-			}
-		} else {
-			simple_err("radosPool_initImages: "
-				   "failed to allocate rbd Image", rbd_fd);
-			break;
-		}
-		p += strlen(iname) + 1;
-	}
-	free(imagenames);
-	return;
-}
 
-void
-rbdImages_init(void)
-{
-	int i;
-
-	for (i = 0; i < MAX_RBD_IMAGES; i++) {
-		rbdFds[i].fd = -1;
-		rbdFds[i].rbd = (struct rbdImage *)NULL;
-		rbdImages[i].rbd_stat.valid = 0;
-		if (i+1 < MAX_RBD_IMAGES) {
-			rbdImages[i].next = &(rbdImages[i+1]);
-		} else {
-			rbdImages[i].next = (struct rbdImage *)NULL;
-		}
-		rbdImages[i].rbd_in_use = 0;
+	for (ip = ibuf; *ip != '\0' && ip < &ibuf[ibuf_len]; ip += strlen(ip) + 1)  {
+		fprintf(stderr, "adding image %s/%s\n", pool->pool_name, ip);
+		im = malloc(sizeof(*im));
+		im->pool = pool;
+		im->image_name = ip;
+		im->next = *head;
+		*head = im;
 	}
 	return;
 }
@@ -720,81 +678,49 @@ allocate_radosPool(rados_t cluster, char *pool_name)
 	return poolfd;
 }
 
-int lookup_rbdImage(char *image_name)
-{
-	int fd, errors;
-	struct rbdImage *rbd;
-
-	errors = 0;
-	fd = -1;
-	if (image_name == (char *)NULL) {
-		errors++;
-	}
-
-	if (!errors) {
-		for (fd = 0; fd < MAX_RBD_IMAGES; fd++) {
-			rbd = rbdFds[fd].rbd;
-			if (rbd == NULL) {
-				continue;
-			}
-			if (rbd->rbd_in_use == 0) {
-				continue;
-			}
-			if (rbd->image_name == (char *)NULL)
-			{
-				continue;
-			}
-			if (strcmp(rbd->image_name, image_name) == 0) {
-				break;
-			}
-		}
-		if (fd >= MAX_RBD_IMAGES) {
-			fd = -1;
-		}
-	}
-	return fd;
-}
-
 int
-allocate_rbdImage(struct radosPool *pool)
+open_rbdImage(const char *image_name)
 {
-	int fd;
+	struct rbdImage *im;
+	struct rbdOpenImage *rbd;
+	int fd, i;
+	int ret;
 
-	for (fd = 0; fd < MAX_RBD_IMAGES; fd++) {
-		if (rbdFds[fd].fd == -1) {
-			rbdFds[fd].fd = fd;
-			rbdFds[fd].rbd = &(rbdImages[fd]);
-			rbdImages[fd].rbd_in_use = 1;
-			rbdImages[fd].pool = pool;
+	if (image_name == (char *)NULL) 
+		return -1;
+
+	/* find free rbdFds[] entry, assign fd */
+	for (i = 0; i < MAX_RBD_IMAGES; i++) {
+		if (rbdFds[i].rbdimage == NULL) {
+			fd = i;
+			rbd = &rbdFds[fd];
 			break;
 		}
 	}
+	if (i == MAX_RBD_IMAGES)
+		return -1;
 
-	if (fd >= MAX_RBD_IMAGES) {
+	get_rbdImages(&rbdImages);
+	for (im = rbdImages; im != NULL; i++, im = im->next) {
+		if (strcmp(im->image_name, image_name) == 0) {
+			rbd->rbdimage = im;
+			break;
+		}
+	}
+	if (im == NULL)
+		return -1;
+
+	ret = rbd_open(pool->ioctx, rbd->rbdimage->image_name, &(rbd->image),
+		       NULL);
+	if (ret < 0) {
+		simple_err("open_rbdImage: can't open: ", ret);
 		return -1;
 	} else {
-		return fd;
+		rbd_stat(rbd->image, &(rbd->rbd_stat.rbd_info),
+			 sizeof(rbd_image_info_t));
+		rbd->rbd_stat.valid = 1;
 	}
-}
-
-void
-deallocate_rbdImage(int imageId)
-{
-	struct rbdImage *rbd;
-	if (imageId < 0 || imageId >= MAX_RBD_IMAGES) {
-		return;
-	}
-	rbdFds[imageId].fd = -1;
-	rbd = rbdFds[imageId].rbd;
-	rbdFds[imageId].rbd= (struct rbdImage *)NULL;
-
-	if (rbd->image_name != NULL) {
-		free(rbd->image_name);
-		rbd->image_name = NULL;
-	}
-	rbd->rbd_in_use = 0;
-
-	return;
+	return fd;
 }
 
 int main(int argc, char *argv[])
@@ -802,7 +728,6 @@ int main(int argc, char *argv[])
 	struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
 
 	radosPools_init();
-	rbdImages_init();
 
 	if (fuse_opt_parse(&args, &rbdOptions, blockfs_opts, blockfs_opt_proc)
 	    == -1) {
