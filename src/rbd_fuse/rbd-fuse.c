@@ -62,19 +62,21 @@ struct rbdImage {
 struct rbdImage *rbdImages;
 
 struct rbdOpenImage {
-	struct rbdImage *rbdimage;
+	char *image_name;
 	rbd_image_t image;
 	struct rbdStat rbd_stat;
 };
 #define MAX_RBD_IMAGES		128
-struct rbdOpenImage rbdFds[MAX_RBD_IMAGES];
+struct rbdOpenImage opentbl[MAX_RBD_IMAGES];
 
 struct rbdOptions rbdOptions = {"/etc/ceph/ceph.conf", "rbd"};
 
+// Minimize calls to rbd_list: marks bracketing of opendir/<ops>/releasedir
+int in_opendir;
 
 /* prototypes */
 void radosPools_init(void);
-void get_rbdImages(struct rbdImage **head);
+void enumerate_images(struct rbdImage **head);
 void simple_err(const char *msg, int err);
 int connect_to_cluster();
 
@@ -83,8 +85,7 @@ int lookup_radosPool(char *pool_name);
 int allocate_radosPool(rados_t cluster, char *pool_name);
 
 int open_rbdImage(const char *image_name);
-int allocate_rbdImage(struct radosPool *pool);
-void deallocate_rbdImage(int imageId);
+int find_openrbd(const char *path);
 
 static void
 iter_images(void *cookie,
@@ -104,7 +105,7 @@ static int read_property(int fd, char *name, unsigned int *_value)
 	unsigned int value;
 	struct rbdOpenImage *rbd;
 
-	rbd = &rbdFds[fd];
+	rbd = &opentbl[fd];
 
 	if (rbd->image == NULL)
 		return -1;
@@ -130,7 +131,10 @@ static int count_images(void)
 {
 	unsigned int count = 0;
 
-	get_rbdImages(&rbdImages);
+	pthread_mutex_lock(&readdir_lock);
+	enumerate_images(&rbdImages);
+	pthread_mutex_unlock(&readdir_lock);
+
 	iter_images(&count, count_images_cb);
 	return count;
 }
@@ -167,6 +171,11 @@ static int blockfs_getattr(const char *path, struct stat *stbuf)
 		return 0;
 	}
 
+	if (!in_opendir) {
+		pthread_mutex_lock(&readdir_lock);
+		enumerate_images(&rbdImages);
+		pthread_mutex_unlock(&readdir_lock);
+	}
 	fd = open_rbdImage(path + 1);
 	if (fd < 0)
 		return -ENOENT;
@@ -211,6 +220,9 @@ static int blockfs_open(const char *path, struct fuse_file_info *fi)
 	if (path[0] == 0)
 		return -ENOENT;
 
+	pthread_mutex_lock(&readdir_lock);
+	enumerate_images(&rbdImages);
+	pthread_mutex_unlock(&readdir_lock);
 	fd = open_rbdImage(path + 1);
 	if (fd < 0)
 		return -ENOENT;
@@ -237,7 +249,7 @@ static int blockfs_read(const char *path, char *buf, size_t size,
 	if (!gotrados)
 		return -ENXIO;
 
-	rbd = &rbdFds[fi->fh];
+	rbd = &opentbl[fi->fh];
 	numread = 0;
 	while (size > 0) {
 		ssize_t ret;
@@ -264,7 +276,7 @@ static int blockfs_write(const char *path, const char *buf, size_t size,
 	if (!gotrados)
 		return -ENXIO;
 
-	rbd = &rbdFds[fi->fh];
+	rbd = &opentbl[fi->fh];
 	numwritten = 0;
 	while (size > 0) {
 		ssize_t ret;
@@ -308,7 +320,9 @@ static int blockfs_statfs(const char *path, struct statvfs *buf)
 
 	num[0] = 1;
 	num[1] = 0;
-	get_rbdImages(&rbdImages);
+	pthread_mutex_lock(&readdir_lock);
+	enumerate_images(&rbdImages);
+	pthread_mutex_unlock(&readdir_lock);
 	iter_images(num, blockfs_statfs_image_cb);
 
 #define	RBDFS_BSIZE	4096
@@ -332,7 +346,7 @@ static int blockfs_fsync(const char *path, int datasync,
 {
 	if (!gotrados)
 		return -ENXIO;
-	rbd_flush(rbdFds[fi->fh].image);
+	rbd_flush(opentbl[fi->fh].image);
 	return 0;
 }
 
@@ -348,11 +362,23 @@ static void blockfs_readdir_cb(void *_info, const char *name, int dirfd)
 	info->filler(info->buf, name, NULL, 0);
 }
 
+static int blockfs_opendir(const char *path, struct fuse_file_info *fi)
+{
+	// only one directory; should we worry about threads?
+	pthread_mutex_lock(&readdir_lock);
+	in_opendir++;
+	enumerate_images(&rbdImages);
+	pthread_mutex_unlock(&readdir_lock);
+	return 0;
+}
 static int blockfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 			   off_t offset, struct fuse_file_info *fi)
 {
 	struct blockfs_readdir_info info = { buf, filler };
 
+	if (!in_opendir) {
+		fprintf(stderr, "in readdir, but not in opendir/releasedir?\n");
+	}
 	if (!gotrados)
 		return -ENXIO;
 
@@ -361,9 +387,16 @@ static int blockfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
 	filler(buf, ".", NULL, 0);
 	filler(buf, "..", NULL, 0);
-	get_rbdImages(&rbdImages);
 	iter_images(&info, blockfs_readdir_cb);
 
+	return 0;
+}
+static int blockfs_releasedir(const char *path, struct fuse_file_info *fi)
+{
+	// see opendir comments
+	pthread_mutex_lock(&readdir_lock);
+	in_opendir--;
+	pthread_mutex_unlock(&readdir_lock);
 	return 0;
 }
 
@@ -407,30 +440,45 @@ blockfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 	uint64_t features = DEFAULT_IMAGE_FEATURES;
 
 	r = rbd_create2(pool->ioctx, path+1, size, features, &order);
-	fprintf(stderr, "rbd_create %s size 0x%lx returns %d\n",
- 		path, size, r);
 	return r;
 }
 
 int
 blockfs_utime(const char *path, struct utimbuf *utime)
 {
-	fprintf(stderr, "blockfs_utime(%s): ignoring\n", path);
+	// called on create; not relevant
 	return 0;
 }
 
+int
+blockfs_unlink(const char *path)
+{
+	int fd = find_openrbd(path);
+	if (fd != -1) {
+		struct rbdOpenImage *rbd = &opentbl[fd];
+		rbd_close(rbd->image);
+		rbd->image = 0;
+		free(rbd->image_name);
+		rbd->rbd_stat.valid = 0;
+	}
+	return rbd_remove(pool->ioctx, path+1);
+}
+
 static struct fuse_operations blockfs_oper = {
-	.getattr	= blockfs_getattr,
-	.truncate	= blockfs_truncate,
-	.open		= blockfs_open,
-	.read		= blockfs_read,
-	.write		= blockfs_write,
-	.statfs		= blockfs_statfs,
-	.fsync		= blockfs_fsync,
-	.readdir	= blockfs_readdir,
-	.init		= blockfs_init,
 	.create		= blockfs_create,
-	.utime		= blockfs_utime
+	.fsync		= blockfs_fsync,
+	.getattr	= blockfs_getattr,
+	.init		= blockfs_init,
+	.open		= blockfs_open,
+	.opendir	= blockfs_opendir,
+	.read		= blockfs_read,
+	.readdir	= blockfs_readdir,
+	.releasedir	= blockfs_releasedir,
+	.statfs		= blockfs_statfs,
+	.truncate	= blockfs_truncate,
+	.unlink		= blockfs_unlink,
+	.utime		= blockfs_utime,
+	.write		= blockfs_write,
 };
 
 enum {
@@ -600,13 +648,13 @@ radosPools_init(void)
 }
 
 void
-get_rbdImages(struct rbdImage **head)
+enumerate_images(struct rbdImage **head)
 {
 	char *ibuf;
 	size_t ibuf_len;
 	struct rbdImage *im, *next;
 	char *ip;
-	int r;
+	int actual_len;
 
 	if (*head != NULL) {
 		for (im = *head; im != NULL;) {
@@ -617,23 +665,25 @@ get_rbdImages(struct rbdImage **head)
 		*head = NULL;
 	}
 
-	ibuf_len = 0;
-	rbd_list(pool->ioctx, NULL, &ibuf_len);
+	ibuf_len = 1024;
 	ibuf = malloc(ibuf_len);
-	r = rbd_list(pool->ioctx, ibuf, &ibuf_len);
-	if (r < 0) {
-		simple_err("rbd_list: error %d\n", r);
+	actual_len = rbd_list(pool->ioctx, ibuf, &ibuf_len);
+	if (actual_len < 0) {
+		simple_err("rbd_list: error %d\n", actual_len);
 		return;
 	}
 
-	for (ip = ibuf; *ip != '\0' && ip < &ibuf[ibuf_len]; ip += strlen(ip) + 1)  {
-		fprintf(stderr, "adding image %s/%s\n", pool->pool_name, ip);
+	fprintf(stderr, "pool %s: ", pool->pool_name);
+	for (ip = ibuf; *ip != '\0' && ip < &ibuf[actual_len];
+	     ip += strlen(ip) + 1)  {
+		fprintf(stderr, "%s, ", ip);
 		im = malloc(sizeof(*im));
 		im->pool = pool;
 		im->image_name = ip;
 		im->next = *head;
 		*head = im;
 	}
+	fprintf(stderr, "\n");
 	return;
 }
 
@@ -679,6 +729,22 @@ allocate_radosPool(rados_t cluster, char *pool_name)
 }
 
 int
+find_openrbd(const char *path)
+{
+	int i;
+
+	/* find in opentbl[] entry if already open */
+	for (i = 0; i < MAX_RBD_IMAGES; i++) {
+		if ((opentbl[i].image_name != NULL) &&
+		    (strcmp(opentbl[i].image_name, path) == 0)) {
+			return i;
+			break;
+		}
+	}
+	return -1;
+}
+
+int
 open_rbdImage(const char *image_name)
 {
 	struct rbdImage *im;
@@ -689,37 +755,40 @@ open_rbdImage(const char *image_name)
 	if (image_name == (char *)NULL) 
 		return -1;
 
-	/* find free rbdFds[] entry, assign fd */
-	for (i = 0; i < MAX_RBD_IMAGES; i++) {
-		if (rbdFds[i].rbdimage == NULL) {
-			fd = i;
-			rbd = &rbdFds[fd];
-			break;
-		}
-	}
-	if (i == MAX_RBD_IMAGES)
-		return -1;
-
-	get_rbdImages(&rbdImages);
+	// relies on caller to keep rbdImages up to date
 	for (im = rbdImages; im != NULL; i++, im = im->next) {
 		if (strcmp(im->image_name, image_name) == 0) {
-			rbd->rbdimage = im;
 			break;
 		}
 	}
 	if (im == NULL)
 		return -1;
 
-	ret = rbd_open(pool->ioctx, rbd->rbdimage->image_name, &(rbd->image),
-		       NULL);
-	if (ret < 0) {
-		simple_err("open_rbdImage: can't open: ", ret);
-		return -1;
+	/* find in opentbl[] entry if already open */
+	if ((fd = find_openrbd(image_name)) != -1) {
+		rbd = &opentbl[fd];
 	} else {
-		rbd_stat(rbd->image, &(rbd->rbd_stat.rbd_info),
-			 sizeof(rbd_image_info_t));
-		rbd->rbd_stat.valid = 1;
+		// allocate an opentbl[] and open the image
+		for (i = 0; i < MAX_RBD_IMAGES; i++) {
+			if (opentbl[i].image == NULL) {
+				fd = i;
+				rbd = &opentbl[fd];
+				rbd->image_name = strdup(image_name);
+				break;
+			}
+		}
+		if (i == MAX_RBD_IMAGES)
+			return -1;
+		ret = rbd_open(pool->ioctx, rbd->image_name,
+			       &(rbd->image), NULL);
+		if (ret < 0) {
+			simple_err("open_rbdImage: can't open: ", ret);
+			return ret;
+		}
 	}
+	rbd_stat(rbd->image, &(rbd->rbd_stat.rbd_info),
+		 sizeof(rbd_image_info_t));
+	rbd->rbd_stat.valid = 1;
 	return fd;
 }
 
