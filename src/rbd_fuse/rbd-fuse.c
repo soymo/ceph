@@ -62,6 +62,108 @@ int find_openrbd(const char *path);
 
 void simple_err(const char *msg, int err);
 
+void
+enumerate_images(struct rbd_image **head)
+{
+	char *ibuf;
+	size_t ibuf_len;
+	struct rbd_image *im, *next;
+	char *ip;
+	int actual_len;
+
+	if (*head != NULL) {
+		for (im = *head; im != NULL;) {
+			next = im->next;
+			free(im);
+			im = next;
+		}
+		*head = NULL;
+	}
+
+	ibuf_len = 1024;
+	ibuf = malloc(ibuf_len);
+	actual_len = rbd_list(ioctx, ibuf, &ibuf_len);
+	if (actual_len < 0) {
+		simple_err("rbd_list: error %d\n", actual_len);
+		return;
+	}
+
+	fprintf(stderr, "pool %s: ", pool_name);
+	for (ip = ibuf; *ip != '\0' && ip < &ibuf[actual_len];
+	     ip += strlen(ip) + 1)  {
+		fprintf(stderr, "%s, ", ip);
+		im = malloc(sizeof(*im));
+		im->image_name = ip;
+		im->next = *head;
+		*head = im;
+	}
+	fprintf(stderr, "\n");
+	return;
+}
+
+int
+find_openrbd(const char *path)
+{
+	int i;
+
+	/* find in opentbl[] entry if already open */
+	for (i = 0; i < MAX_RBD_IMAGES; i++) {
+		if ((opentbl[i].image_name != NULL) &&
+		    (strcmp(opentbl[i].image_name, path) == 0)) {
+			return i;
+			break;
+		}
+	}
+	return -1;
+}
+
+int
+open_rbd_image(const char *image_name)
+{
+	struct rbd_image *im;
+	struct rbd_openimage *rbd;
+	int fd, i;
+	int ret;
+
+	if (image_name == (char *)NULL) 
+		return -1;
+
+	// relies on caller to keep rbd_images up to date
+	for (im = rbd_images; im != NULL; i++, im = im->next) {
+		if (strcmp(im->image_name, image_name) == 0) {
+			break;
+		}
+	}
+	if (im == NULL)
+		return -1;
+
+	/* find in opentbl[] entry if already open */
+	if ((fd = find_openrbd(image_name)) != -1) {
+		rbd = &opentbl[fd];
+	} else {
+		// allocate an opentbl[] and open the image
+		for (i = 0; i < MAX_RBD_IMAGES; i++) {
+			if (opentbl[i].image == NULL) {
+				fd = i;
+				rbd = &opentbl[fd];
+				rbd->image_name = strdup(image_name);
+				break;
+			}
+		}
+		if (i == MAX_RBD_IMAGES)
+			return -1;
+		ret = rbd_open(ioctx, rbd->image_name, &(rbd->image), NULL);
+		if (ret < 0) {
+			simple_err("open_rbd_image: can't open: ", ret);
+			return ret;
+		}
+	}
+	rbd_stat(rbd->image, &(rbd->rbd_stat.rbd_info),
+		 sizeof(rbd_image_info_t));
+	rbd->rbd_stat.valid = 1;
+	return fd;
+}
+
 static void
 iter_images(void *cookie,
 	    void (*iter)(void *cookie, const char *image))
@@ -564,108 +666,6 @@ failed_shutdown:
 	return r;
 }
 
-
-void
-enumerate_images(struct rbd_image **head)
-{
-	char *ibuf;
-	size_t ibuf_len;
-	struct rbd_image *im, *next;
-	char *ip;
-	int actual_len;
-
-	if (*head != NULL) {
-		for (im = *head; im != NULL;) {
-			next = im->next;
-			free(im);
-			im = next;
-		}
-		*head = NULL;
-	}
-
-	ibuf_len = 1024;
-	ibuf = malloc(ibuf_len);
-	actual_len = rbd_list(ioctx, ibuf, &ibuf_len);
-	if (actual_len < 0) {
-		simple_err("rbd_list: error %d\n", actual_len);
-		return;
-	}
-
-	fprintf(stderr, "pool %s: ", pool_name);
-	for (ip = ibuf; *ip != '\0' && ip < &ibuf[actual_len];
-	     ip += strlen(ip) + 1)  {
-		fprintf(stderr, "%s, ", ip);
-		im = malloc(sizeof(*im));
-		im->image_name = ip;
-		im->next = *head;
-		*head = im;
-	}
-	fprintf(stderr, "\n");
-	return;
-}
-
-int
-find_openrbd(const char *path)
-{
-	int i;
-
-	/* find in opentbl[] entry if already open */
-	for (i = 0; i < MAX_RBD_IMAGES; i++) {
-		if ((opentbl[i].image_name != NULL) &&
-		    (strcmp(opentbl[i].image_name, path) == 0)) {
-			return i;
-			break;
-		}
-	}
-	return -1;
-}
-
-int
-open_rbd_image(const char *image_name)
-{
-	struct rbd_image *im;
-	struct rbd_openimage *rbd;
-	int fd, i;
-	int ret;
-
-	if (image_name == (char *)NULL) 
-		return -1;
-
-	// relies on caller to keep rbd_images up to date
-	for (im = rbd_images; im != NULL; i++, im = im->next) {
-		if (strcmp(im->image_name, image_name) == 0) {
-			break;
-		}
-	}
-	if (im == NULL)
-		return -1;
-
-	/* find in opentbl[] entry if already open */
-	if ((fd = find_openrbd(image_name)) != -1) {
-		rbd = &opentbl[fd];
-	} else {
-		// allocate an opentbl[] and open the image
-		for (i = 0; i < MAX_RBD_IMAGES; i++) {
-			if (opentbl[i].image == NULL) {
-				fd = i;
-				rbd = &opentbl[fd];
-				rbd->image_name = strdup(image_name);
-				break;
-			}
-		}
-		if (i == MAX_RBD_IMAGES)
-			return -1;
-		ret = rbd_open(ioctx, rbd->image_name, &(rbd->image), NULL);
-		if (ret < 0) {
-			simple_err("open_rbd_image: can't open: ", ret);
-			return ret;
-		}
-	}
-	rbd_stat(rbd->image, &(rbd->rbd_stat.rbd_info),
-		 sizeof(rbd_image_info_t));
-	rbd->rbd_stat.valid = 1;
-	return fd;
-}
 
 int main(int argc, char *argv[])
 {
