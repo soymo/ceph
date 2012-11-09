@@ -1,8 +1,5 @@
 /*
  * rbd-fuse
- *
- * compile with
- * cc -D_FILE_OFFSET_BITS=64 rbd-fuse.c -o rbd-fuse -lfuse -lrbd
  */
 #define FUSE_USE_VERSION 26
 
@@ -22,17 +19,11 @@
 #include "include/rbd/librbd.h"
 
 static int gotrados = 0;
-struct radosPool *pool;
+char *pool_name;
 rados_t cluster;
+rados_ioctx_t ioctx;
 
 static pthread_mutex_t readdir_lock;
-
-struct radosStat {
-	u_char valid;
-	char objname[RBD_MAX_BLOCK_NAME_SIZE];
-	uint64_t size;
-	time_t mtime;
-};
 
 struct rbdStat {
 	u_char valid;
@@ -44,18 +35,7 @@ struct rbdOptions {
 	char *pool_name;
 };
 
-struct radosPool {
-	char *pool_name;
-	rados_t	cluster;
-	rados_ioctx_t ioctx;
-	struct radosStat rados_stat;
-	struct radosPool *next;
-};
-#define MAX_RADOS_POOLS		32
-struct radosPool radosPools[MAX_RADOS_POOLS];
-
 struct rbdImage {
-	struct radosPool *pool;
 	char *image_name;
 	struct rbdImage *next;
 };
@@ -75,14 +55,9 @@ struct rbdOptions rbdOptions = {"/etc/ceph/ceph.conf", "rbd"};
 int in_opendir;
 
 /* prototypes */
-void radosPools_init(void);
 void enumerate_images(struct rbdImage **head);
 void simple_err(const char *msg, int err);
 int connect_to_cluster();
-
-int radosPool_start(rados_t cluster, char *pool_name);
-int lookup_radosPool(char *pool_name);
-int allocate_radosPool(rados_t cluster, char *pool_name);
 
 int open_rbdImage(const char *image_name);
 int find_openrbd(const char *path);
@@ -404,7 +379,6 @@ void *
 blockfs_init(struct fuse_conn_info *conn)
 {
 	int ret;
-	int poolfd;
 
 	// init cannot fail, so if we fail here, gotrados remains at 0,
 	// causing other operations to fail immediately with ENXIO
@@ -412,11 +386,12 @@ blockfs_init(struct fuse_conn_info *conn)
 	ret = connect_to_cluster();
 	if (ret < 0)
 		exit(90);
-	poolfd = radosPool_start(cluster, rbdOptions.pool_name);
-	if (poolfd < 0)
+
+	pool_name = rbdOptions.pool_name;
+	ret = rados_ioctx_create(cluster, pool_name, &ioctx);
+	if (ret < 0)
 		exit(91);
 
-	pool = &(radosPools[poolfd]);
 	conn->want |= FUSE_CAP_BIG_WRITES;
 	gotrados = 1;
 
@@ -439,7 +414,7 @@ blockfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 	int order = DEFAULT_IMAGE_ORDER;
 	uint64_t features = DEFAULT_IMAGE_FEATURES;
 
-	r = rbd_create2(pool->ioctx, path+1, size, features, &order);
+	r = rbd_create2(ioctx, path+1, size, features, &order);
 	return r;
 }
 
@@ -461,7 +436,7 @@ blockfs_unlink(const char *path)
 		free(rbd->image_name);
 		rbd->rbd_stat.valid = 0;
 	}
-	return rbd_remove(pool->ioctx, path+1);
+	return rbd_remove(ioctx, path+1);
 }
 
 static struct fuse_operations blockfs_oper = {
@@ -589,63 +564,6 @@ failed_shutdown:
 	return r;
 }
 
-int
-radosPool_start(rados_t cluster, char *pool_name)
-{
-	int r = 0;
-	int poolfd;
-	struct radosPool *pool;
-	struct radosStat *sbuf;
-
-	poolfd = lookup_radosPool(pool_name);
-	pool = NULL;
-
-	if (poolfd >= 0) {
-		simple_err("Pool already started", poolfd);
-		poolfd = -EEXIST;
-	} else {
-		poolfd = allocate_radosPool(cluster, pool_name);
-		if (poolfd >= 0) {
-			pool = &(radosPools[poolfd]);
-		} else {
-			poolfd = -ENOSPC;
-		}
-	}
-
-	if (pool != (struct radosPool *)NULL) {
-		r = rados_ioctx_create(pool->cluster, pool_name,
-				       &(pool->ioctx));
-		if (r < 0) {
-			simple_err("Error creating ioctx", r);
-			poolfd = r;
-		} else {
-			sbuf = &(pool->rados_stat);
-			rados_stat(pool->ioctx, &(sbuf->objname[0]),
-				   &(sbuf->size), &(sbuf->mtime));
-			pool->rados_stat.valid = 1;
-		}
-
-	}
-	return poolfd;
-}
-
-
-void
-radosPools_init(void)
-{
-	int i;
-
-	for (i = 0; i < MAX_RADOS_POOLS; i++) {
-		radosPools[i].pool_name = NULL;
-		radosPools[i].rados_stat.valid = 0;
-		if ((i+1) < MAX_RADOS_POOLS) {
-			radosPools[i].next = &(radosPools[i+1]);
-		} else {
-			radosPools[i].next = (struct radosPool *)NULL;
-		}
-	}
-	return;
-}
 
 void
 enumerate_images(struct rbdImage **head)
@@ -667,65 +585,23 @@ enumerate_images(struct rbdImage **head)
 
 	ibuf_len = 1024;
 	ibuf = malloc(ibuf_len);
-	actual_len = rbd_list(pool->ioctx, ibuf, &ibuf_len);
+	actual_len = rbd_list(ioctx, ibuf, &ibuf_len);
 	if (actual_len < 0) {
 		simple_err("rbd_list: error %d\n", actual_len);
 		return;
 	}
 
-	fprintf(stderr, "pool %s: ", pool->pool_name);
+	fprintf(stderr, "pool %s: ", pool_name);
 	for (ip = ibuf; *ip != '\0' && ip < &ibuf[actual_len];
 	     ip += strlen(ip) + 1)  {
 		fprintf(stderr, "%s, ", ip);
 		im = malloc(sizeof(*im));
-		im->pool = pool;
 		im->image_name = ip;
 		im->next = *head;
 		*head = im;
 	}
 	fprintf(stderr, "\n");
 	return;
-}
-
-int
-lookup_radosPool(char *pool_name)
-{
-	int i, poolfd;
-
-	poolfd = -1;
-
-	for (i = 0; i < MAX_RADOS_POOLS; i++) {
-		if (radosPools[i].pool_name == NULL) {
-			continue;
-		}
-		if (strcmp(pool_name, radosPools[i].pool_name) == 0) {
-			poolfd = i;
-			break;
-		}
-	}
-
-	return poolfd;
-}
-
-int
-allocate_radosPool(rados_t cluster, char *pool_name)
-{
-	int i, poolfd;
-
-	poolfd = -1;
-
-	if (lookup_radosPool(pool_name) < 0) {
-		for (i = 0; i < MAX_RADOS_POOLS; i++) {
-			if (radosPools[i].pool_name == NULL) {
-				radosPools[i].pool_name = strdup(pool_name);
-				radosPools[i].cluster = cluster;
-				poolfd = i;
-				break;
-			}
-		}
-	}
-
-	return poolfd;
 }
 
 int
@@ -779,8 +655,7 @@ open_rbdImage(const char *image_name)
 		}
 		if (i == MAX_RBD_IMAGES)
 			return -1;
-		ret = rbd_open(pool->ioctx, rbd->image_name,
-			       &(rbd->image), NULL);
+		ret = rbd_open(ioctx, rbd->image_name, &(rbd->image), NULL);
 		if (ret < 0) {
 			simple_err("open_rbdImage: can't open: ", ret);
 			return ret;
@@ -795,8 +670,6 @@ open_rbdImage(const char *image_name)
 int main(int argc, char *argv[])
 {
 	struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
-
-	radosPools_init();
 
 	if (fuse_opt_parse(&args, &rbdOptions, blockfs_opts, blockfs_opt_proc)
 	    == -1) {
