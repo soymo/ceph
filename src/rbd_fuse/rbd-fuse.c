@@ -57,7 +57,7 @@ int in_opendir;
 /* prototypes */
 void enumerate_images(struct rbdImage **head);
 void simple_err(const char *msg, int err);
-int connect_to_cluster();
+int connect_to_cluster(rados_t *pcluster);
 
 int open_rbdImage(const char *image_name);
 int find_openrbd(const char *path);
@@ -383,7 +383,7 @@ blockfs_init(struct fuse_conn_info *conn)
 	// init cannot fail, so if we fail here, gotrados remains at 0,
 	// causing other operations to fail immediately with ENXIO
 
-	ret = connect_to_cluster();
+	ret = connect_to_cluster(&cluster);
 	if (ret < 0)
 		exit(90);
 
@@ -536,22 +536,22 @@ simple_err(const char *msg, int err)
 }
 
 int
-connect_to_cluster()
+connect_to_cluster(rados_t *pcluster)
 {
 	int r;
 
-	r = rados_create(&(cluster), NULL);
+	r = rados_create(pcluster, NULL);
 	if (r < 0) {
 		simple_err("Could not create cluster handle", r);
 		return r;
 	}
-	rados_conf_parse_env(cluster, NULL);
-	r = rados_conf_read_file(cluster, rbdOptions.ceph_config);
+	rados_conf_parse_env(*pcluster, NULL);
+	r = rados_conf_read_file(*pcluster, rbdOptions.ceph_config);
 	if (r < 0) {
 		simple_err("Error reading Ceph config file", r);
 		goto failed_shutdown;
 	}
-	r = rados_connect(cluster);
+	r = rados_connect(*pcluster);
 	if (r < 0) {
 		simple_err("Error connecting to cluster", r);
 		goto failed_shutdown;
@@ -560,7 +560,7 @@ connect_to_cluster()
 	return 0;
 
 failed_shutdown:
-	rados_shutdown(cluster);
+	rados_shutdown(*pcluster);
 	return r;
 }
 
