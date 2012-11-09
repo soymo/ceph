@@ -55,23 +55,23 @@ struct rbd_options rbd_options = {"/etc/ceph/ceph.conf", "rbd"};
 int in_opendir;
 
 /* prototypes */
-void enumerate_images(struct rbd_image **head);
-void simple_err(const char *msg, int err);
 int connect_to_cluster(rados_t *pcluster);
-
+void enumerate_images(struct rbd_image **head);
 int open_rbd_image(const char *image_name);
 int find_openrbd(const char *path);
 
+void simple_err(const char *msg, int err);
+
 static void
 iter_images(void *cookie,
-	    void (*iter)(void *cookie, const char *image, int dirfd))
+	    void (*iter)(void *cookie, const char *image))
 {
 	struct rbd_image *im;
 
 	pthread_mutex_lock(&readdir_lock);
 
 	for (im = rbd_images; im != NULL; im = im->next)
-		iter(cookie, im->image_name, -1);
+		iter(cookie, im->image_name);
 	pthread_mutex_unlock(&readdir_lock);
 }
 
@@ -97,7 +97,7 @@ static int read_property(int fd, char *name, unsigned int *_value)
 	return 0;
 }
 
-static void count_images_cb(void *cookie, const char *image, int dirfd)
+static void count_images_cb(void *cookie, const char *image)
 {
 	(*((unsigned int *)cookie))++;
 }
@@ -269,7 +269,7 @@ static int blockfs_write(const char *path, const char *buf, size_t size,
 	return numwritten;
 }
 
-static void blockfs_statfs_image_cb(void *num, const char *image, int dirfd)
+static void blockfs_statfs_image_cb(void *num, const char *image)
 {
 	unsigned int num_parts, part_size;
 	int	fd;
@@ -278,10 +278,10 @@ static void blockfs_statfs_image_cb(void *num, const char *image, int dirfd)
 
 	fd = open_rbd_image(image);
 	if (fd >= 0) {
-		if (read_property(fd, "num_objs", &num_parts) >= 0) {
-			if (read_property(fd, "obj_size", &part_size) >= 0) {
-				((uint64_t *)num)[1] += (uint64_t)num_parts * (uint64_t)part_size;
-			}
+		if (read_property(fd, "num_objs", &num_parts) >= 0 && 
+		    read_property(fd, "obj_size", &part_size) >= 0) {
+			((uint64_t *)num)[1] +=
+				 (uint64_t)num_parts * (uint64_t)part_size;
 		}
 	}
 }
@@ -325,37 +325,37 @@ static int blockfs_fsync(const char *path, int datasync,
 	return 0;
 }
 
-struct blockfs_readdir_info {
-	void *buf;
-	fuse_fill_dir_t filler;
-};
-
-static void blockfs_readdir_cb(void *_info, const char *name, int dirfd)
-{
-	struct blockfs_readdir_info *info = _info;
-
-	info->filler(info->buf, name, NULL, 0);
-}
-
 static int blockfs_opendir(const char *path, struct fuse_file_info *fi)
 {
-	// only one directory; should we worry about threads?
+	// only one directory, so global "in_opendir" flag should be fine
 	pthread_mutex_lock(&readdir_lock);
 	in_opendir++;
 	enumerate_images(&rbd_images);
 	pthread_mutex_unlock(&readdir_lock);
 	return 0;
 }
+
+struct blockfs_readdir_info {
+	void *buf;
+	fuse_fill_dir_t filler;
+};
+
+static void blockfs_readdir_cb(void *_info, const char *name)
+{
+	struct blockfs_readdir_info *info = _info;
+
+	info->filler(info->buf, name, NULL, 0);
+}
+
 static int blockfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 			   off_t offset, struct fuse_file_info *fi)
 {
 	struct blockfs_readdir_info info = { buf, filler };
 
-	if (!in_opendir) {
-		fprintf(stderr, "in readdir, but not in opendir/releasedir?\n");
-	}
 	if (!gotrados)
 		return -ENXIO;
+	if (!in_opendir)
+		fprintf(stderr, "in readdir, but not inside opendir?\n");
 
 	if (strcmp(path, "/") != 0)
 		return -ENOENT;
