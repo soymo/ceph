@@ -2,6 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 m4_include(m4/acx_pthread.m4)
 m4_include(m4/ax_cxx_static_cast.m4)
+m4_include(m4/ax_c_var_func.m4)
 
 # Autoconf
 AC_PREREQ(2.59)
@@ -84,6 +85,9 @@ AC_CHECK_CC_FLAG([-Wignored-qualifiers], [WARN_IGNORED_QUALIFIERS])
 
 # Checks for static_cast<> feature
 AX_CXX_STATIC_CAST
+
+# Checks for __func__
+AX_C_VAR_FUNC
 
 # Checks for libraries.
 ACX_PTHREAD
