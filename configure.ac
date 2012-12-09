@@ -1,6 +1,7 @@
 #                                               -*- Autoconf -*-
 # Process this file with autoconf to produce a configure script.
 m4_include(m4/acx_pthread.m4)
+m4_include(m4/ax_cxx_static_cast.m4)
 
 # Autoconf
 AC_PREREQ(2.59)
@@ -80,6 +81,9 @@ AC_DEFUN([AC_CHECK_CC_FLAG],
 
 AC_CHECK_CC_FLAG([-Wtype-limits], [WARN_TYPE_LIMITS])
 AC_CHECK_CC_FLAG([-Wignored-qualifiers], [WARN_IGNORED_QUALIFIERS])
+
+# Checks for static_cast<> feature
+AX_CXX_STATIC_CAST
 
 # Checks for libraries.
 ACX_PTHREAD
