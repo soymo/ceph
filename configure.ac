@@ -87,7 +87,7 @@ AX_CXX_STATIC_CAST
 
 # Checks for libraries.
 ACX_PTHREAD
-AC_CHECK_LIB([uuid], [uuid_parse], [true], AC_MSG_FAILURE([libuuid not found]))
+AC_SEARCH_LIBS([uuid_parse], [uuid],, AC_MSG_FAILURE([uuid library not found]))
 AC_CHECK_LIB([m], [pow], [true], AC_MSG_FAILURE([libm not found]))
 AC_CHECK_LIB([resolv], [__res_nquery], [true], AC_MSG_FAILURE([libresolv not found]))
 if test x"$linux" = x"yes"; then
