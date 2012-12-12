@@ -11,10 +11,19 @@ check_for_pkg_config() {
     exit 1
 }
 
+# Find a suitable libtoolize utility
+if which libtoolize > /dev/null 2>&1; then
+  LIBTOOLIZE=libtoolize
+else
+  if which glibtoolize > /dev/null 2>&1; then
+    LIBTOOLIZE=glibtoolize
+  fi
+fi
+
 rm -f config.cache
 aclocal #-I m4
 check_for_pkg_config
-libtoolize --force --copy
+${LIBTOOLIZE} --force --copy
 autoconf
 autoheader
 automake -a --add-missing -Wall
