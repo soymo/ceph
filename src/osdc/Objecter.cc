@@ -258,6 +258,10 @@ void Objecter::shutdown_unlocked()
 void Objecter::send_linger(LingerOp *info)
 {
   ldout(cct, 15) << "send_linger " << info->linger_id << dendl;
+  if (!info->is_watch && info->registering) {
+    ldout(cct, 20) << "not creating a new request for already registered notify" << dendl;
+    return;
+  }
   vector<OSDOp> opv = info->ops; // need to pass a copy to ops
   Context *onack = (!info->registered && info->on_reg_ack) ? new C_Linger_Ack(this, info) : NULL;
   Context *oncommit = new C_Linger_Commit(this, info);
@@ -267,7 +271,7 @@ void Objecter::send_linger(LingerOp *info)
   o->snapid = info->snap;
 
   // do not resend this; we will send a new op to reregister
-  o->should_resend = false;
+  o->should_resend = !info->is_watch;
 
   if (info->session) {
     int r = recalc_op_target(o);
@@ -296,6 +300,8 @@ void Objecter::send_linger(LingerOp *info)
       s->linger_ops.push_back(&info->session_item);
   }
 
+  info->registering = true;
+
   logger->inc(l_osdc_linger_send);
 }
 
@@ -319,6 +325,7 @@ void Objecter::_linger_commit(LingerOp *info, int r)
   }
 
   // only tell the user the first time we do this
+  info->registering = false;
   info->registered = true;
   info->pobjver = NULL;
 }
@@ -335,6 +342,11 @@ void Objecter::unregister_linger(uint64_t linger_id)
   }
 }
 
+/**
+ * Note that this is meant to handle a watch OR a notify, but not both in the same ObjectOperation.
+ * This is because watches need to be resent with a new tid on map changes, while notifies
+ * need to resend using the old tid.
+ */
 tid_t Objecter::linger(const object_t& oid, const object_locator_t& oloc, 
 		       ObjectOperation& op,
 		       snapid_t snap, bufferlist& inbl, bufferlist *poutbl, int flags,
@@ -349,6 +361,18 @@ tid_t Objecter::linger(const object_t& oid, const object_locator_t& oloc,
   info->snap = snap;
   info->flags = flags;
   info->ops = op.ops;
+  bool saw_notify = false;
+  for (vector<OSDOp>::const_iterator it = info->ops.begin();
+       it != info->ops.end(); ++it) {
+    if (it->op.op == CEPH_OSD_OP_WATCH)
+      info->is_watch = true;
+    if (it->op.op == CEPH_OSD_OP_NOTIFY)
+      saw_notify = true;
+    if (info->is_watch)
+      assert(it->op.op != CEPH_OSD_OP_NOTIFY);
+    if (saw_notify)
+      assert(it->op.op != CEPH_OSD_OP_WATCH);
+  }
   info->inbl = inbl;
   info->poutbl = poutbl;
   info->pobjver = objver;
