@@ -157,7 +157,8 @@ base: ceph-mon ceph-osd ceph-mds \
 # fuse targets?
 if WITH_FUSE
 ceph_fuse_SOURCES = ceph_fuse.cc client/fuse_ll.cc
-ceph_fuse_LDADD = -lfuse libclient.la $(LIBGLOBAL_LDA)
+ceph_fuse_LDADD = $(fuse_LIBS) libclient.la $(LIBGLOBAL_LDA)
+ceph_fuse_CPPFLAGS = $(fuse_CFLAGS)
 ceph_fuse_CXXFLAGS = ${AM_CXXFLAGS}
 bin_PROGRAMS += ceph-fuse
 
