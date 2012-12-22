@@ -19,7 +19,7 @@
 #elif defined(__linux__)
 #include <sys/types.h>
 #include <sys/xattr.h>
-#elif defined(DARWIN)
+#elif defined(__APPLE__)
 #include <sys/xattr.h>
 #else
 #error "Your system is not supported!"
@@ -42,8 +42,10 @@ ceph_os_setxattr(const char *path, const char *name,
 	    size);
 	if (error > 0)
 		error = 0;
-#elif defined(__linux__) || defined(DARWIN)
+#elif defined(__linux__)
 	error = setxattr(path, name, value, size, 0);
+#elif defined(__APPLE__)
+	error = setxattr(path, name, value, size, 0, 0);
 #endif
 
 	return (error);
@@ -60,8 +62,10 @@ ceph_os_fsetxattr(int fd, const char *name, const void *value,
 	    size);
 	if (error > 0)
 		error = 0;
-#elif defined(__linux__) || defined(DARWIN)
+#elif defined(__linux__)
 	error = fsetxattr(fd, name, value, size, 0);
+#elif defined(__APPLE__)
+	error = fsetxattr(fd, name, value, size, 0, 0);
 #endif
 
 	return (error);
@@ -92,8 +96,8 @@ void *value, size_t size)
 	}
 #elif defined(__linux__)
 	error = getxattr(path, name, value, size);
-#elif defined(DARWIN)
-	error = getxattr(path, name, value, size, 0);
+#elif defined(__APPLE__)
+	error = getxattr(path, name, value, size, 0, 0);
 #endif
 
 	return (error);
@@ -124,8 +128,8 @@ ceph_os_fgetxattr(int fd, const char *name, void *value,
 	}
 #elif defined(__linux__)
 	error = fgetxattr(fd, name, value, size);
-#elif defined(DARWIN)
-	error = fgetxattr(fd, name, value, size, 0);
+#elif defined(__APPLE__)
+	error = fgetxattr(fd, name, value, size, 0, 0);
 #endif
 
 	return (error);
@@ -173,7 +177,7 @@ ceph_os_listxattr(const char *path, char *list, size_t size)
 	}
 #elif defined(__linux__)
 	error = listxattr(path, list, size);
-#elif defined(DARWIN)
+#elif defined(__APPLE__)
 	error = listxattr(path, list, size, 0);
 #endif
 
@@ -222,7 +226,7 @@ ceph_os_flistxattr(int fd, char *list, size_t size)
 	}
 #elif defined(__linux__)
 	error = flistxattr(fd, list, size);
-#elif defined(DARWIN)
+#elif defined(__APPLE__)
 	error = flistxattr(fd, list, size, 0);
 #endif
 
@@ -238,7 +242,7 @@ ceph_os_removexattr(const char *path, const char *name)
 	error = extattr_delete_file(path, EXTATTR_NAMESPACE_USER, name);
 #elif defined(__linux__)
 	error = removexattr(path, name);
-#elif defined(DARWIN)
+#elif defined(__APPLE__)
 	error = removexattr(path, name, 0);
 #endif
 
@@ -254,7 +258,7 @@ ceph_os_fremovexattr(int fd, const char *name)
 	error = extattr_delete_fd(fd, EXTATTR_NAMESPACE_USER, name);
 #elif defined(__linux__)
 	error = fremovexattr(fd, name);
-#elif defined(DARWIN)
+#elif defined(__APPLE__)
 	error = fremovexattr(fd, name, 0);
 #endif
 
