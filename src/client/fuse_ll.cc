@@ -158,9 +158,17 @@ static void ceph_ll_setattr(fuse_req_t req, fuse_ino_t ino, struct stat *attr,
 
 // XATTRS
 
+#ifdef __APPLE__
+static void ceph_ll_setxattr(fuse_req_t req, fuse_ino_t ino, const char *name,
+			     const char *value, size_t size, int flags, uint32_t position)
+#else
 static void ceph_ll_setxattr(fuse_req_t req, fuse_ino_t ino, const char *name,
 			     const char *value, size_t size, int flags)
+#endif
 {
+#ifdef __APPLE__
+  assert(position == 0);
+#endif
   const struct fuse_ctx *ctx = fuse_req_ctx(req);
   int r = client->ll_setxattr(fino_vino(ino), name, value, size, flags, ctx->uid, ctx->gid);
   fuse_reply_err(req, -r);
@@ -179,9 +187,17 @@ static void ceph_ll_listxattr(fuse_req_t req, fuse_ino_t ino, size_t size)
     fuse_reply_err(req, -r);
 }
 
+#ifdef __APPLE__
+static void ceph_ll_getxattr(fuse_req_t req, fuse_ino_t ino, const char *name,
+			     size_t size, uint32_t position)
+#else
 static void ceph_ll_getxattr(fuse_req_t req, fuse_ino_t ino, const char *name,
 			     size_t size)
+#endif
 {
+#ifdef __APPLE__
+  assert(position == 0);
+#endif
   const struct fuse_ctx *ctx = fuse_req_ctx(req);
   char buf[size];
   int r = client->ll_getxattr(fino_vino(ino), name, buf, size, ctx->uid, ctx->gid);
