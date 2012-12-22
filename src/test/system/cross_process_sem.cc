@@ -36,7 +36,11 @@ create(int initial_val, CrossProcessSem** res)
 {
   struct cross_process_sem_data_t *data = static_cast < cross_process_sem_data_t*> (
     mmap(NULL, sizeof(struct cross_process_sem_data_t),
+#ifdef __APPLE__
+       PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANON, 0, 0));
+#else
        PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, 0, 0));
+#endif
   if (data == MAP_FAILED) {
     int err = errno;
     return err;

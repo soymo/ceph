@@ -53,7 +53,11 @@ SimpleMessenger::SimpleMessenger(CephContext *cct, entity_name_t name,
     timeout(0),
     local_connection(new Connection)
 {
+#ifdef __APPLE__
+  pthread_mutex_init(&global_seq_lock, NULL);
+#else
   pthread_spin_init(&global_seq_lock, PTHREAD_PROCESS_PRIVATE);
+#endif
   init_local_connection();
 }
 

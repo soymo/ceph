@@ -63,7 +63,7 @@ namespace ceph {
     atomic_t &operator=(const atomic_t &rhs);
   };
 }
-#else
+#elif !defined(__APPLE__)
 /*
  * crappy slow implementation that uses a pthreads spinlock.
  */
@@ -122,5 +122,40 @@ namespace ceph {
     atomic_t &operator=(const atomic_t &rhs);
   };
 }
+#elif defined(__APPLE__)
+
+#include <libkern/OSAtomic.h>
+#include "include/assert.h"
+
+namespace ceph {
+  class atomic_t {
+    int64_t val;
+  public:
+    atomic_t(int64_t i=0) : val(i) {}
+    void set(size_t v) {
+      val = v;
+    }
+    int64_t inc() {
+      return OSAtomicIncrement64Barrier(&val);
+    }
+    int64_t dec() {
+      return OSAtomicDecrement64Barrier(&val);
+    }
+    void add(int64_t add_me) {
+      OSAtomicAdd64Barrier(add_me, &val);
+    }
+    void sub(int sub_me) {
+      OSAtomicAdd64Barrier(0 - sub_me, &val);
+    }
+    int64_t read() const {
+      return val;
+    }
+  private:
+    // forbid copying
+    atomic_t(const atomic_t &other);
+    atomic_t &operator=(const atomic_t &rhs);
+  };
+}
+
 #endif
 #endif

@@ -13,6 +13,7 @@
  */
 
 #include "include/types.h"
+#include "include/compat.h"
 
 #include "include/rados/librados.hpp"
 #include "rados_sync.h"

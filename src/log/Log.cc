@@ -13,6 +13,7 @@
 #include "common/safe_io.h"
 #include "common/Clock.h"
 #include "include/assert.h"
+#include "include/compat.h"
 
 #define DEFAULT_MAX_NEW    100
 #define DEFAULT_MAX_RECENT 10000
@@ -22,12 +23,22 @@
 namespace ceph {
 namespace log {
 
+#ifdef __APPLE__
+static Log **log_on_exit_p;
+static void log_on_exit(void)
+{
+  Log *l = *(Log **)log_on_exit_p;
+  if (l)
+    l->flush();
+}
+#else
 static void log_on_exit(int r, void *p)
 {
   Log *l = *(Log **)p;
   if (l)
     l->flush();
 }
+#endif
 
 Log::Log(SubsystemMap *s)
   : m_indirect_this(NULL),
@@ -42,7 +53,11 @@ Log::Log(SubsystemMap *s)
 {
   int ret;
 
+#ifdef __APPLE__
+  ret = pthread_mutex_init(&m_lock, NULL);
+#else
   ret = pthread_spin_init(&m_lock, PTHREAD_PROCESS_SHARED);
+#endif
   assert(ret == 0);
 
   ret = pthread_mutex_init(&m_flush_mutex, NULL);
@@ -70,7 +85,11 @@ Log::~Log()
   if (m_fd >= 0)
     TEMP_FAILURE_RETRY(::close(m_fd));
 
+#ifdef __APPLE__
+  pthread_mutex_destroy(&m_lock);
+#else
   pthread_spin_destroy(&m_lock);
+#endif
   pthread_mutex_destroy(&m_queue_mutex);
   pthread_mutex_destroy(&m_flush_mutex);
   pthread_cond_destroy(&m_cond);
@@ -87,7 +106,12 @@ void Log::set_flush_on_exit()
   // assume that exit() won't race with ~Log().
   if (m_indirect_this == NULL) {
     m_indirect_this = new (Log*)(this);
+#ifdef __APPLE__
+    log_on_exit_p = m_indirect_this;
+    atexit(log_on_exit);
+#else
     on_exit(log_on_exit, m_indirect_this);
+#endif
   }
 }
 

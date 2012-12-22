@@ -750,6 +750,7 @@ int FileStore::mkfs()
 	goto close_fsid_fd;
       }
 
+#if defined(__linux__)
       if (btrfs_stable_commits) {
 	// create snap_1 too
 	snprintf(volargs.name, sizeof(volargs.name), COMMIT_SNAP_ITEM, 1ull);
@@ -775,6 +776,7 @@ int FileStore::mkfs()
 	}
 	TEMP_FAILURE_RETRY(::close(volargs.fd));
       }
+#endif
     }
     TEMP_FAILURE_RETRY(::close(fd));  
   }
@@ -2914,8 +2916,10 @@ int FileStore::_write(coll_t cid, const hobject_t& oid,
       true
 #endif
       ) {
+#ifndef __APPLE__
     if (m_filestore_sync_flush)
       ::sync_file_range(fd, offset, len, SYNC_FILE_RANGE_WRITE);
+#endif
     lfn_close(fd);
   }
 
@@ -2962,7 +2966,11 @@ int FileStore::_zero(coll_t cid, const hobject_t& oid, uint64_t offset, size_t l
     ret = _write(cid, oid, offset, len, bl);
   }
 
+#ifdef CEPH_HAVE_FALLOCATE
+# if !defined(DARWIN) && !defined(__FreeBSD__)
  out:
+#endif
+#endif
   dout(20) << "zero " << cid << "/" << oid << " " << offset << "~" << len << " = " << ret << dendl;
   return ret;
 }

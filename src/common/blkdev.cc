@@ -11,7 +11,7 @@
 #include "acconfig.h"
 #include "include/compat.h"
 
-#if defined(__FreeBSD__)
+#if defined(__FreeBSD__) || defined(__APPLE__)
 #include <sys/disk.h>
 #endif
 
@@ -31,6 +31,15 @@ int get_block_device_size(int fd, int64_t *psize)
   ret = ::ioctl(fd, BLKGETSIZE, &sectors);
   *psize = sectors * 512ULL;
 #endif
+#elif defined(__APPLE__)
+  unsigned long blocksize = 0;
+  ret = ::ioctl(fd, DKIOCGETBLOCKSIZE, &blocksize);
+  if (!ret) {
+    unsigned long nblocks;
+    ret = ::ioctl(fd, DKIOCGETBLOCKCOUNT, &nblocks);
+    if (!ret)
+      *psize = nblocks * blocksize;
+  }
 #else
 #error "Compile error: we don't know how to get the size of a raw block device."
 #endif /* !__FreeBSD__ */

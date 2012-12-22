@@ -16,6 +16,9 @@
 #elif defined(__FreeBSD_)
 #include <sys/types.h>
 #include "include/inttypes.h"
+#elif defined(__APPLE__)
+#include <sys/types.h>
+#include "include/inttypes.h"
 #endif
 
 struct fiemap_extent {

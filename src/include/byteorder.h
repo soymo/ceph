@@ -11,6 +11,8 @@
 #include <endian.h>
 #elif defined(__FreeBSD__)
 #include <sys/endian.h>
+#elif defined(__APPLE__)
+#include <machine/endian.h>
 #else
 #error "Your platform is not yet supported."
 #endif
@@ -19,6 +21,12 @@
 #define	__BYTE_ORDER _BYTE_ORDER
 #define	__BIG_ENDIAN _BIG_ENDIAN
 #define	__LITTLE_ENDIAN _LITTLE_ENDIAN
+#endif
+
+#if defined(__APPLE__)
+# define __BYTE_ORDER BYTE_ORDER
+# define __BIG_ENDIAN BIG_ENDIAN
+# define __LITTLE_ENDIAN LITTLE_ENDIAN
 #endif
 
 static __inline__ __u16 swab16(__u16 val) 

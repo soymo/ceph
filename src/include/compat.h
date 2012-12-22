@@ -19,4 +19,9 @@
 #define	MSG_MORE 0
 #endif /* !__FreeBSD__ */
 
+#if defined(__APPLE__)
+#define	lseek64(fd, offset, whence)	lseek(fd, offset, whence)
+#define	TEMP_FAILURE_RETRY
+#endif
+
 #endif /* !CEPH_COMPAT_H */

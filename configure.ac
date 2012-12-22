@@ -93,7 +93,7 @@ AX_C_VAR_FUNC
 ACX_PTHREAD
 AC_SEARCH_LIBS([uuid_parse], [uuid],, AC_MSG_FAILURE([uuid library not found]))
 AC_CHECK_LIB([m], [pow], [true], AC_MSG_FAILURE([libm not found]))
-AC_CHECK_LIB([resolv], [__res_nquery], [true], AC_MSG_FAILURE([libresolv not found]))
+AC_CHECK_LIB([resolv], [res_query], [true], AC_MSG_FAILURE([libresolv not found]))
 if test x"$linux" = x"yes"; then
 	AC_CHECK_LIB([keyutils], [add_key], [true], AC_MSG_FAILURE([libkeyutils not found]))
 fi

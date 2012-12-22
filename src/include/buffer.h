@@ -20,6 +20,9 @@
 #elif defined(__FreeBSD__)
 #include <sys/types.h>
 #include "include/inttypes.h"
+#elif defined(__APPLE__)
+#include <sys/types.h>
+#include "include/inttypes.h"
 #endif
 
 #ifndef _XOPEN_SOURCE

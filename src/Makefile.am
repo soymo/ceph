@@ -44,12 +44,9 @@ check-local:
 	$(srcdir)/test/encoding/check-generated.sh
 	$(srcdir)/test/encoding/readable.sh ../ceph-object-corpus
 
-EXTRALIBS = -luuid
+EXTRALIBS =
 if FREEBSD
 EXTRALIBS += -lexecinfo
-endif
-if LINUX
-EXTRALIBS += -lrt
 endif
 if WITH_PROFILER
 EXTRALIBS += -lprofiler
@@ -245,9 +242,9 @@ omapbench_SOURCES = test/omap_bench.cc
 omapbench_LDADD = librados.la $(LIBGLOBAL_LDA)
 bin_DEBUGPROGRAMS += omapbench
 
-kvstorebench_SOURCES = test/kv_store_bench.cc key_value_store/kv_flat_btree_async.cc
-kvstorebench_LDADD = librados.la $(LIBGLOBAL_LDA)
-bin_DEBUGPROGRAMS += kvstorebench
+#kvstorebench_SOURCES = test/kv_store_bench.cc key_value_store/kv_flat_btree_async.cc
+#kvstorebench_LDADD = librados.la $(LIBGLOBAL_LDA)
+#bin_DEBUGPROGRAMS += kvstorebench
 
 multi_stress_watch_SOURCES = test/multi_stress_watch.cc test/librados/test.cc
 multi_stress_watch_LDADD = librados.la $(LIBGLOBAL_LDA)
@@ -411,9 +408,9 @@ librbd_la_LDFLAGS = ${AM_LDFLAGS} -version-info 1:0:0 \
 	-export-symbols-regex '^rbd_.*' $(PTHREAD_LIBS) $(EXTRALIBS) 
 lib_LTLIBRARIES += librbd.la
 
-rados_SOURCES = rados.cc rados_import.cc rados_export.cc rados_sync.cc common/obj_bencher.cc
-rados_LDADD = libglobal.la libcls_lock_client.a librados.la $(PTHREAD_LIBS) -lm $(CRYPTO_LIBS) $(EXTRALIBS)
-bin_PROGRAMS += rados
+#rados_SOURCES = rados.cc rados_import.cc rados_export.cc rados_sync.cc common/obj_bencher.cc
+#rados_LDADD = libglobal.la libcls_lock_client.a librados.la $(PTHREAD_LIBS) -lm $(CRYPTO_LIBS) $(EXTRALIBS)
+#bin_PROGRAMS += rados
 
 if WITH_REST_BENCH
 
@@ -551,13 +548,13 @@ endif
 ## key_value_store classes
 
 # key_value_store: key value store class
-libcls_kvs_la_SOURCES = key_value_store/cls_kvs.cc
-libcls_kvs_la_CFLAGS = ${AM_CFLAGS}
-libcls_kvs_la_CXXFLAGS= ${AM_CXXFLAGS}
-libcls_kvs_la_LIBADD = $(PTHREAD_LIBS) $(EXTRALIBS)
-libcls_kvs_la_LDFLAGS = ${AM_LDFLAGS} -version-info 1:0:0 -export-symbols-regex '.*__cls_.*'
+#libcls_kvs_la_SOURCES = key_value_store/cls_kvs.cc
+#libcls_kvs_la_CFLAGS = ${AM_CFLAGS}
+#libcls_kvs_la_CXXFLAGS= ${AM_CXXFLAGS}
+#libcls_kvs_la_LIBADD = $(PTHREAD_LIBS) $(EXTRALIBS)
+#libcls_kvs_la_LDFLAGS = ${AM_LDFLAGS} -version-info 1:0:0 -export-symbols-regex '.*__cls_.*'
 
-radoslib_LTLIBRARIES += libcls_kvs.la
+#radoslib_LTLIBRARIES += libcls_kvs.la
 
 ## System tests
 libsystest_la_SOURCES = \
@@ -1058,7 +1055,7 @@ AM_CXXFLAGS = \
 # http://www.gentoo.org/proj/en/qa/asneeded.xml
 # http://gcc.gnu.org/ml/gcc-help/2010-12/msg00338.html
 # http://sigquit.wordpress.com/2011/02/16/why-asneeded-doesnt-work-as-expected-for-your-libraries-on-your-autotools-project/
-AM_LDFLAGS = -Wl,--as-needed
+AM_LDFLAGS = -Wl
 
 if USE_BOOST_SPIRIT_OLD_HDR
 AM_CXXFLAGS += -DUSE_BOOST_SPIRIT_OLD_HDR
@@ -1169,7 +1166,6 @@ clean-local:
 libcommon_la_SOURCES = $(libcommon_files)
 libcommon_la_CFLAGS= ${CRYPTO_CFLAGS} ${AM_CFLAGS}
 libcommon_la_CXXFLAGS= ${AM_CXXFLAGS}
-libcommon_la_LDFLAGS = -lrt
 noinst_LTLIBRARIES += libcommon.la
 
 libglobal_la_SOURCES = \
@@ -1626,9 +1622,9 @@ noinst_HEADERS = \
 	json_spirit/json_spirit_writer.h\
 	json_spirit/json_spirit_writer_options.h\
 	json_spirit/json_spirit_writer_template.h\
-	key_value_store/key_value_structure.h\
-	key_value_store/kv_flat_btree_async.h\
-	key_value_store/kvs_arg_types.h\
+	#key_value_store/key_value_structure.h\
+	#key_value_store/kv_flat_btree_async.h\
+	#key_value_store/kvs_arg_types.h\
 	log/Entry.h\
 	log/EntryQueue.h\
 	log/Log.h\

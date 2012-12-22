@@ -54,7 +54,7 @@ int get_process_name(char *buf, int len)
      * null-terminated. */
     return -ENAMETOOLONG;
   }
-#if defined(__FreeBSD__)
+#if defined(__APPLE__) || defined(__FreeBSD__)
 #warning XXX
     return -ENAMETOOLONG;
 #else

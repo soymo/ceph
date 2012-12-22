@@ -16,7 +16,11 @@
 #define CEPH_SYNC_FILESYSTEM_H
 
 #include <unistd.h>
+#ifdef __APPLE__
+#include <sys/syscall.h>
+#else
 #include <syscall.h>
+#endif
 
 #ifndef __CYGWIN__
 # ifndef DARWIN

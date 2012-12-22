@@ -493,7 +493,11 @@ private:
   /// counter for the global seq our connection protocol uses
   __u32 global_seq;
   /// lock to protect the global_seq
+#ifdef __APPLE__
+  pthread_mutex_t global_seq_lock;
+#else
   pthread_spinlock_t global_seq_lock;
+#endif
 
   /// hash map of addresses to Pipes
   hash_map<entity_addr_t, Pipe*> rank_pipe;
@@ -552,11 +556,19 @@ public:
    * @return a global sequence ID that nobody else has seen.
    */
   __u32 get_global_seq(__u32 old=0) {
+#ifdef __APPLE__
+    pthread_mutex_lock(&global_seq_lock);
+#else
     pthread_spin_lock(&global_seq_lock);
+#endif
     if (old > global_seq)
       global_seq = old;
     __u32 ret = ++global_seq;
+#ifdef __APPLE__
+    pthread_mutex_unlock(&global_seq_lock);
+#else
     pthread_spin_unlock(&global_seq_lock);
+#endif
     return ret;
   }
   /**

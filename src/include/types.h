@@ -98,7 +98,8 @@ namespace __gnu_cxx {
     }
   };
 
-#ifndef __LP64__
+
+#if defined(__APPLE__) || !defined(__LP64__)
   template<> struct hash<int64_t> {
     size_t operator()(int64_t __x) const { 
       static hash<int32_t> H;

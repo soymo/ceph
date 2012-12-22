@@ -1738,7 +1738,11 @@ int Pipe::do_sendmsg(struct msghdr *msg, int len, bool more)
       assert(l == len);
     }
 
+#ifdef __APPLE__
+    int r = ::sendmsg(sd, msg, SO_NOSIGPIPE);
+#else
     int r = ::sendmsg(sd, msg, MSG_NOSIGNAL | (more ? MSG_MORE : 0));
+#endif
     if (r == 0) 
       ldout(msgr->cct,10) << "do_sendmsg hmm do_sendmsg got r==0!" << dendl;
     if (r < 0) { 
@@ -2075,7 +2079,11 @@ int Pipe::tcp_write(const char *buf, int len)
   //lgeneric_dout(cct, DBL) << "tcp_write writing " << len << dendl;
   assert(len > 0);
   while (len > 0) {
+#ifdef __APPLE__
+    int did = ::send( sd, buf, len, SO_NOSIGPIPE);
+#else
     int did = ::send( sd, buf, len, MSG_NOSIGNAL );
+#endif
     if (did < 0) {
       //lgeneric_dout(cct, 1) << "tcp_write error did = " << did << "  errno " << errno << " " << strerror(errno) << dendl;
       //lgeneric_derr(cct, 1) << "tcp_write error did = " << did << "  errno " << errno << " " << strerror(errno) << dendl;

@@ -4212,9 +4212,17 @@ int Client::_setattr(Inode *in, struct stat *attr, int mask, int uid, int gid)
   if (in->caps_issued_mask(CEPH_CAP_FILE_EXCL)) {
     if (mask & (CEPH_SETATTR_MTIME|CEPH_SETATTR_ATIME)) {
       if (mask & CEPH_SETATTR_MTIME)
+#ifdef __APPLE__
+	in->mtime = utime_t(attr->st_mtimespec.tv_sec, attr->st_mtimespec.tv_nsec);
+#else
 	in->mtime = utime_t(attr->st_mtim.tv_sec, attr->st_mtim.tv_nsec);
+#endif
       if (mask & CEPH_SETATTR_ATIME)
+#ifdef __APPLE__
+	in->atime = utime_t(attr->st_atimespec.tv_sec, attr->st_atimespec.tv_nsec);
+#else
 	in->atime = utime_t(attr->st_atim.tv_sec, attr->st_atim.tv_nsec);
+#endif
       in->ctime = ceph_clock_now(cct);
       in->time_warp_seq++;
       mark_caps_dirty(in, CEPH_CAP_FILE_EXCL);
@@ -4245,13 +4253,21 @@ int Client::_setattr(Inode *in, struct stat *attr, int mask, int uid, int gid)
   }
   if (mask & CEPH_SETATTR_MTIME) {
     req->head.args.setattr.mtime =
+#ifdef __APPLE__
+      utime_t(attr->st_mtimespec.tv_sec, attr->st_mtimespec.tv_nsec);
+#else
       utime_t(attr->st_mtim.tv_sec, attr->st_mtim.tv_nsec);
+#endif
     req->inode_drop |= CEPH_CAP_AUTH_SHARED | CEPH_CAP_FILE_RD |
       CEPH_CAP_FILE_WR;
   }
   if (mask & CEPH_SETATTR_ATIME) {
     req->head.args.setattr.atime =
+#ifdef __APPLE__
+      utime_t(attr->st_atimespec.tv_sec, attr->st_atimespec.tv_nsec);
+#else
       utime_t(attr->st_atim.tv_sec, attr->st_atim.tv_nsec);
+#endif
     req->inode_drop |= CEPH_CAP_FILE_CACHE | CEPH_CAP_FILE_RD |
       CEPH_CAP_FILE_WR;
   }
@@ -4345,16 +4361,33 @@ int Client::fill_stat(Inode *in, struct stat *st, frag_info_t *dirstat, nest_inf
   st->st_uid = in->uid;
   st->st_gid = in->gid;
   if (in->ctime.sec() > in->mtime.sec()) {
+#ifdef __APPLE__
+    st->st_ctimespec.tv_sec = in->ctime.sec();
+    st->st_ctimespec.tv_nsec = in->ctime.nsec();
+#else
     st->st_ctim.tv_sec = in->ctime.sec();
     st->st_ctim.tv_nsec = in->ctime.nsec();
+#endif
   } else {
+#ifdef __APPLE__
+    st->st_ctimespec.tv_sec = in->mtime.sec();
+    st->st_ctimespec.tv_nsec = in->mtime.nsec();
+#else
     st->st_ctim.tv_sec = in->mtime.sec();
     st->st_ctim.tv_nsec = in->mtime.nsec();
+#endif
   }
+#ifdef __APPLE__
+  st->st_atimespec.tv_sec = in->atime.sec();
+  st->st_atimespec.tv_nsec = in->atime.nsec();
+  st->st_mtimespec.tv_sec = in->mtime.sec();
+  st->st_mtimespec.tv_nsec = in->mtime.nsec();
+#else
   st->st_atim.tv_sec = in->atime.sec();
   st->st_atim.tv_nsec = in->atime.nsec();
   st->st_mtim.tv_sec = in->mtime.sec();
   st->st_mtim.tv_nsec = in->mtime.nsec();
+#endif
   if (in->is_dir()) {
     //st->st_size = in->dirstat.size();
     st->st_size = in->rstat.rbytes;
@@ -4473,10 +4506,17 @@ int Client::utime(const char *relpath, struct utimbuf *buf)
   if (r < 0)
     return r;
   struct stat attr;
+#ifdef __APPLE__
+  attr.st_mtimespec.tv_sec = buf->modtime;
+  attr.st_mtimespec.tv_nsec = 0;
+  attr.st_atimespec.tv_sec = buf->actime;
+  attr.st_atimespec.tv_nsec = 0;
+#else
   attr.st_mtim.tv_sec = buf->modtime;
   attr.st_mtim.tv_nsec = 0;
   attr.st_atim.tv_sec = buf->actime;
   attr.st_atim.tv_nsec = 0;
+#endif
   return _setattr(in, &attr, CEPH_SETATTR_MTIME|CEPH_SETATTR_ATIME);
 }
 

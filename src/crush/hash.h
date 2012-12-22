@@ -1,5 +1,6 @@
 #ifndef CEPH_CRUSH_HASH_H
 #define CEPH_CRUSH_HASH_H
+#include "include/inttypes.h"
 
 #define CRUSH_HASH_RJENKINS1   0
 

@@ -61,6 +61,15 @@ static void netmask_ipv6(const struct in6_addr *addr,
     memset(out->s6_addr+prefix_len/8+1, 0, 16-prefix_len/8-1);
 }
 
+#if defined(__APPLE__)
+/* OSX seems not to define these. */
+#ifndef s6_addr16
+#define s6_addr16 __u6_addr.__u6_addr16
+#endif
+#ifndef s6_addr32
+#define s6_addr32 __u6_addr.__u6_addr32
+#endif
+#endif
 
 const struct sockaddr *find_ipv6_in_subnet(const struct ifaddrs *addrs,
 					   const struct sockaddr_in6 *net,

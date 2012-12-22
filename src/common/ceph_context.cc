@@ -52,9 +52,17 @@ public:
     while (1) {
       if (_cct->_conf->heartbeat_interval) {
 	struct timespec timeout;
+  struct timeval _timeout;
+#ifdef __APPLE__
+  gettimeofday(&_timeout, NULL);
+  timeout.tv_sec = _timeout.tv_sec;
+  timeout.tv_nsec = _timeout.tv_usec * 1000;
+#else
 	clock_gettime(CLOCK_REALTIME, &timeout);
+#endif
 	timeout.tv_sec += _cct->_conf->heartbeat_interval;
-	sem_timedwait(&_sem, &timeout);
+	//sem_timedwait(&_sem, &timeout);
+  sem_wait(&_sem);
       } else {
 	sem_wait(&_sem);
       }
@@ -233,7 +241,11 @@ CephContext::CephContext(uint32_t module_type_)
     _crypto_none(NULL),
     _crypto_aes(NULL)
 {
+#ifdef __APPLE__
+  pthread_mutex_init(&_service_thread_lock, NULL);
+#else
   pthread_spin_init(&_service_thread_lock, PTHREAD_PROCESS_SHARED);
+#endif
 
   _log = new ceph::log::Log(&_conf->subsys);
   _log->start();
@@ -301,7 +313,11 @@ CephContext::~CephContext()
   _log = NULL;
 
   delete _conf;
+#ifdef __APPLE__
+  pthread_mutex_destroy(&_service_thread_lock);
+#else
   pthread_spin_destroy(&_service_thread_lock);
+#endif
 
   delete _crypto_none;
   delete _crypto_aes;
@@ -309,14 +325,26 @@ CephContext::~CephContext()
 
 void CephContext::start_service_thread()
 {
+#ifdef __APPLE__
+  pthread_mutex_lock(&_service_thread_lock);
+#else
   pthread_spin_lock(&_service_thread_lock);
+#endif
   if (_service_thread) {
+#ifdef __APPLE__
+    pthread_mutex_unlock(&_service_thread_lock);
+#else
     pthread_spin_unlock(&_service_thread_lock);
+#endif
     return;
   }
   _service_thread = new CephContextServiceThread(this);
   _service_thread->create();
+#ifdef __APPLE__
+  pthread_mutex_unlock(&_service_thread_lock);
+#else
   pthread_spin_unlock(&_service_thread_lock);
+#endif
 
   // make logs flush on_exit()
   if (_conf->log_flush_on_exit)
@@ -334,22 +362,42 @@ void CephContext::start_service_thread()
 
 void CephContext::reopen_logs()
 {
+#ifdef __APPLE__
+  pthread_mutex_lock(&_service_thread_lock);
+#else
   pthread_spin_lock(&_service_thread_lock);
+#endif
   if (_service_thread)
     _service_thread->reopen_logs();
+#ifdef __APPLE__
+  pthread_mutex_unlock(&_service_thread_lock);
+#else
   pthread_spin_unlock(&_service_thread_lock);
+#endif
 }
 
 void CephContext::join_service_thread()
 {
+#ifdef __APPLE__
+  pthread_mutex_lock(&_service_thread_lock);
+#else
   pthread_spin_lock(&_service_thread_lock);
+#endif
   CephContextServiceThread *thread = _service_thread;
   if (!thread) {
+#ifdef __APPLE__
+    pthread_mutex_unlock(&_service_thread_lock);
+#else
     pthread_spin_unlock(&_service_thread_lock);
+#endif
     return;
   }
   _service_thread = NULL;
+#ifdef __APPLE__
+  pthread_mutex_unlock(&_service_thread_lock);
+#else
   pthread_spin_unlock(&_service_thread_lock);
+#endif
 
   thread->exit_thread();
   thread->join();

@@ -21,7 +21,11 @@ class Log : private Thread
 
   SubsystemMap *m_subs;
   
+#ifdef __APPLE__
+  pthread_mutex_t m_lock;
+#else
   pthread_spinlock_t m_lock;
+#endif
   pthread_mutex_t m_queue_mutex;
   pthread_mutex_t m_flush_mutex;
   pthread_cond_t m_cond;
