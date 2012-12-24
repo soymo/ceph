@@ -503,6 +503,32 @@ AC_CHECK_FUNC([fallocate],
 	[AC_DEFINE([CEPH_HAVE_FALLOCATE], [], [fallocate(2) is supported])],
 	[])
 
+AC_CHECK_HEADERS([stdint.h sys/types.h linux/types.h])
+
+AC_CHECK_TYPES(int8_t)
+AC_CHECK_TYPES(uint8_t)
+AC_CHECK_TYPES(int16_t)
+AC_CHECK_TYPES(uint16_t)
+AC_CHECK_TYPES(int32_t)
+AC_CHECK_TYPES(uint32_t)
+AC_CHECK_TYPES(int64_t)
+AC_CHECK_TYPES(uint64_t)
+
+AC_CHECK_TYPES(__u8)
+AC_CHECK_TYPES(__s8)
+AC_CHECK_TYPES(__u16)
+AC_CHECK_TYPES(__s16)
+AC_CHECK_TYPES(__u32)
+AC_CHECK_TYPES(__s32)
+AC_CHECK_TYPES(__u64)
+AC_CHECK_TYPES(__s64)
+
+AC_CHECK_TYPES(__le16)
+AC_CHECK_TYPES(__be16)
+AC_CHECK_TYPES(__le32)
+AC_CHECK_TYPES(__be32)
+AC_CHECK_TYPES(__le64)
+AC_CHECK_TYPES(__be64)
 
 # Checks for typedefs, structures, and compiler characteristics.
 #AC_HEADER_STDBOOL
