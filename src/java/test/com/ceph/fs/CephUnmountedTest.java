@@ -136,4 +136,9 @@ public class CephUnmountedTest {
   public void test_get_repl() throws Exception {
     mount.get_file_replication(0);
   }
+
+  @Test(expected=CephNotMountedException.class)
+  public void test_fchmod() throws Exception {
+    mount.fchmod(1, 0);
+  }
 }
