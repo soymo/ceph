@@ -2310,19 +2310,27 @@ void OSD::RemoveWQ::_process(boost::tuple<coll_t, SequencerRef, DeletingStateRef
        i != olist.end();
        ++i, ++num) {
     if (num % 20 == 0) {
+      store->apply_transaction(*t);
+      delete t;
+      /*
       store->queue_transaction(
 	osr, t,
 	new ObjectStore::C_DeleteTransactionHolder<SequencerRef>(t, item->get<1>()),
 	new ContainerContext<SequencerRef>(item->get<1>()));
+      */
       t = new ObjectStore::Transaction;
     }
     t->remove(coll, *i);
   }
   t->remove_collection(coll);
+  store->apply_transaction(*t);
+  delete t;
+  /*
   store->queue_transaction(
     osr, t,
     new ObjectStore::C_DeleteTransactionHolder<SequencerRef>(t, item->get<1>()),
     new ContainerContext<SequencerRef>(item->get<1>()));
+  */
   delete item;
 }
 // =========================================
