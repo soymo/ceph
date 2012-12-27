@@ -890,4 +890,20 @@ public class CephMountTest {
     mount.unlink(path);
   }
 
+  @Test
+  public void test_get_file_pool_name() throws Exception {
+    String path = makePath();
+    int fd = createFile(path, 1);
+    String pool = mount.get_file_pool_name(fd);
+    mount.close(fd);
+    assertTrue(pool != null);
+    assertTrue(pool.compareTo("data") == 0);
+    mount.unlink(path);
+  }
+
+  @Test(expected=IOException.class)
+  public void test_get_file_pool_name_ebadf() throws Exception {
+    String pool = mount.get_file_pool_name(-40);
+  }
+
 }
