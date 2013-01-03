@@ -2500,8 +2500,6 @@ JNIEXPORT jstring JNICALL Java_com_ceph_fs_CephMount_native_1ceph_1get_1file_1po
 
   if (ret < 0)
     handle_error(env, ret);
-  else if (ret == 0)
-    pool = env->NewStringUTF("");
   else
     pool = env->NewStringUTF(buf);
 
