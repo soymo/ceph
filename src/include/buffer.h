@@ -438,8 +438,11 @@ public:
   public:
     hash() : crc(0) { }
 
-    void update(buffer::list& bl) {
-      crc = bl.crc32c(crc);
+    void update(const buffer::list& bl) {
+      crc = ((buffer::list&)bl).crc32c(crc);
+    }
+    void update(const std::string& str) {
+      crc = ceph_crc32c_le(crc, (const unsigned char*)str.c_str(), str.length());
     }
 
     __u32 digest() {
@@ -517,8 +520,13 @@ inline std::ostream& operator<<(std::ostream& out, buffer::error& e)
   return out << e.what();
 }
 
-inline bufferhash& operator<<(bufferhash& l, bufferlist &r) {
+inline bufferhash& operator<<(bufferhash& l, const bufferlist &r) {
   l.update(r);
+  return l;
+}
+
+inline bufferhash& operator<<(bufferhash& l, const std::string& s) {
+  l.update(s);
   return l;
 }
 

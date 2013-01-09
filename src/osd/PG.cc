@@ -3140,6 +3140,29 @@ void PG::_scan_list(ScrubMap &map, vector<hobject_t> &ls, bool deep)
         }
         o.digest = h.digest();
         o.digest_present = true;
+
+        //XXX: Should this be run even if osd->store->stat() failed (omap but no data?)
+        {
+          bufferhash oh;
+          bufferlist header;
+
+          //Calculate CRC32 of omap header
+          osd->store->omap_get_header(coll, poid, &header);
+          oh << header;
+
+          //Calculate CRC32 of omap key/values
+          ObjectMap::ObjectMapIterator iter = osd->store->get_omap_iterator(
+            coll, poid);
+          assert(iter);
+          for (iter->seek_to_first(); iter->valid() ; iter->next()) {
+            dout(20) << "CRC key " << iter->key() << " value " << iter->value() << dendl;
+            oh << string(iter->key());
+	    oh << iter->value();
+          }
+
+          o.omap_digest = oh.digest();
+          o.omap_digest_present = true;
+        }
       }
 
       dout(25) << "_scan_list  " << poid << dendl;
@@ -4036,6 +4059,16 @@ bool PG::_compare_scrub_objects(ScrubMap::object &auth,
 
       errorstream << "digest " << candidate.digest
                   << " != known digest " << auth.digest;
+    }
+  }
+  if (auth.omap_digest_present && candidate.omap_digest_present) {
+    if (auth.omap_digest != candidate.omap_digest) {
+      if (!ok)
+        errorstream << ", ";
+      ok = false;
+
+      errorstream << "omap_digest " << candidate.omap_digest
+                  << " != known omap_digest " << auth.omap_digest;
     }
   }
   for (map<string,bufferptr>::const_iterator i = auth.attrs.begin();

@@ -1820,8 +1820,11 @@ struct ScrubMap {
     map<string,bufferptr> attrs;
     __u32 digest;
     bool digest_present;
+    __u32 omap_digest;
+    bool omap_digest_present;
 
-    object(): size(0), negative(false), digest(0), digest_present(false) {}
+    object(): size(0), negative(false), digest(0), digest_present(false),
+      omap_digest(0), omap_digest_present(false) {}
 
     void encode(bufferlist& bl) const;
     void decode(bufferlist::iterator& bl);

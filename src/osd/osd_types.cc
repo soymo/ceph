@@ -2733,28 +2733,39 @@ void ScrubMap::generate_test_instances(list<ScrubMap*>& o)
 
 void ScrubMap::object::encode(bufferlist& bl) const
 {
-  ENCODE_START(3, 2, bl);
+  ENCODE_START(4, 2, bl);
   ::encode(size, bl);
   ::encode(negative, bl);
   ::encode(attrs, bl);
   ::encode(digest, bl);
   ::encode(digest_present, bl);
+  ::encode(omap_digest, bl);
+  ::encode(omap_digest_present, bl);
   ENCODE_FINISH(bl);
 }
 
 void ScrubMap::object::decode(bufferlist::iterator& bl)
 {
-  DECODE_START_LEGACY_COMPAT_LEN(3, 2, 2, bl);
+  DECODE_START_LEGACY_COMPAT_LEN(4, 2, 2, bl);
   ::decode(size, bl);
   ::decode(negative, bl);
   ::decode(attrs, bl);
   if (struct_v >= 3) {
     ::decode(digest, bl);
     ::decode(digest_present, bl);
+    if (struct_v >= 4) {
+      ::decode(omap_digest, bl);
+      ::decode(omap_digest_present, bl);
+    } else {
+      omap_digest = 0;
+      omap_digest_present = false;
+    }
   }
   else {
     digest = 0;
     digest_present = false;
+    omap_digest = 0;
+    omap_digest_present = false;
   }
   DECODE_FINISH(bl);
 }
