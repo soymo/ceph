@@ -1194,6 +1194,9 @@ static int do_kernel_add(const char *poolname, const char *imgname, const char *
     oss << " " << snapname;
   }
 
+  // modprobe the rbd module so that /sys/bus/rbd exists
+  system("/sbin/modprobe rbd");
+
   // write to /sys/bus/rbd/add
   int fd = open("/sys/bus/rbd/add", O_WRONLY);
   if (fd < 0) {
