@@ -19,6 +19,7 @@
 #include "msg/msg_types.h"
 
 #include "auth/AuthServiceHandler.h"
+#include "osd/OSDMap.h"
 
 #include "MonCaps.h"
 
@@ -118,19 +119,35 @@ struct MonSessionMap {
     s->get();  // caller gets a ref
     return s;
   }
-  
-  MonSession *get_random_osd_session() {
+
+  MonSession *get_random_osd_session(OSDMap *osdmap) {
     // ok, this isn't actually random, but close enough.
     if (by_osd.empty())
       return 0;
     int n = by_osd.rbegin()->first + 1;
     int r = rand() % n;
-    multimap<int,MonSession*>::iterator p = by_osd.lower_bound(r);
-    if (p == by_osd.end())
-      p--;
-    return p->second;
-  }
 
+    multimap<int,MonSession*>::iterator p;
+
+    if (!osdmap) {
+      p = by_osd.lower_bound(r);
+      if (p == by_osd.end())
+        p--;
+      return p->second;
+    }
+
+    MonSession *s = NULL;
+
+    for (p = by_osd.begin(); p != by_osd.end(); ++p) {
+      if (osdmap->is_up(p->first)) {
+        s = p->second;
+        if (p->first > r)
+          break;
+      }
+    }
+
+    return s;
+  }
 
   void add_update_sub(MonSession *s, const string& what, version_t start, bool onetime, bool incremental_onetime) {
     Subscription *sub = 0;
