@@ -19,6 +19,7 @@
 #include "msg/msg_types.h"
 
 #include "auth/AuthServiceHandler.h"
+#include "osd/OSDMap.h"
 
 #include "MonCaps.h"
 
@@ -131,6 +132,17 @@ struct MonSessionMap {
     return p->second;
   }
 
+  MonSession *get_first_up_osd_session(OSDMap &osdmap) {
+    MonSession *s = NULL;
+    for (multimap<int,MonSession*>::iterator p = by_osd.begin();
+         p != by_osd.end(); ++p) {
+      if (p->second && osdmap.is_up(p->first)) {
+        s = p->second;
+        break;
+      }
+    }
+    return s;
+  }
 
   void add_update_sub(MonSession *s, const string& what, version_t start, bool onetime, bool incremental_onetime) {
     Subscription *sub = 0;
